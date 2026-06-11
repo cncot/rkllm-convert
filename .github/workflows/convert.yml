@@ -9,36 +9,24 @@ jobs:
   convert:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install RKLLM-Toolkit
-        run: |
-          pip install rkllm_toolkit-1.2.3-cp311-cp311-linux_x86_64.whl
+        run: pip install rkllm_toolkit-1.2.3-cp311-cp311-linux_x86_64.whl
 
-      - name: Download model via Python
+      - name: Download model
         run: |
-          python3 -c "
-import os
-from huggingface_hub import snapshot_download
-model = os.environ['MODEL_NAME']
-print(f'Downloading {model}...')
-snapshot_download(repo_id=f'deepseek-ai/{model}', local_dir=f'./{model}', resume_download=True)
-print('Download complete!')
-"
+          python3 -c "from huggingface_hub import snapshot_download; import os; snapshot_download(repo_id='deepseek-ai/'+os.environ['MODEL_NAME'], local_dir='./'+os.environ['MODEL_NAME'], resume_download=True)"
 
-      - name: Convert to RKLLM
+      - name: Convert
         env:
           MODEL_PATH: ./${{ env.MODEL_NAME }}
-          HUGGINGFACE_HUB_CACHE: /tmp/hf-cache
         run: python export_rkllm.py
 
-      - name: Upload RKLLM model
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.MODEL_NAME }}_RK3588
