@@ -1,0 +1,42 @@
+name: Convert DeepSeek-R1-Distill-Qwen-1.5B to RKLLM
+
+on: [workflow_dispatch]
+
+env:
+  MODEL_NAME: "DeepSeek-R1-Distill-Qwen-1.5B"
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install RKLLM-Toolkit
+        run: |
+          wget -q https://github.com/airockchip/rknn-llm/releases/download/release-v1.2.3/rkllm_toolkit-1.2.3-cp311-cp311-linux_x86_64.whl
+          pip install rkllm_toolkit-1.2.3-cp311-cp311-linux_x86_64.whl
+
+      - name: Download DeepSeek model from hf-mirror
+        run: |
+          pip install -U huggingface_hub
+          HF_ENDPOINT=https://hf-mirror.com huggingface-cli download --resume-download \
+            deepseek-ai/${{ env.MODEL_NAME }} \
+            --local-dir ./${{ env.MODEL_NAME }}
+
+      - name: Convert to RKLLM
+        env:
+          MODEL_PATH: ./${{ env.MODEL_NAME }}
+        run: python export_rkllm.py
+
+      - name: Upload RKLLM model
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.MODEL_NAME }}_RK3588
+          path: ./*.rkllm
+          compression-level: 0
