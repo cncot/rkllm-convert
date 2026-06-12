@@ -28,22 +28,26 @@ jobs:
       - name: Install RKLLM-Toolkit
         run: pip install rkllm_toolkit-1.2.3-cp311-cp311-linux_x86_64.whl
 
-      - name: Install huggingface_hub
-        run: pip install huggingface_hub
+      - name: Install dependencies
+        run: pip install huggingface_hub accelerate
+
+      - name: Add swap space for 7B model loading (16GB)
+        run: |
+          sudo fallocate -l 16G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
 
       - name: Download model
         run: |
           python3 -c "from huggingface_hub import snapshot_download; import os; snapshot_download(repo_id='Qwen/'+os.environ['MODEL_NAME'], local_dir='./'+os.environ['MODEL_NAME'], resume_download=True)"
 
-      - name: Set max_context
-        env:
-          MAX_CTX: ${{ github.event.inputs.max_context || '4096' }}
-        run: sed -i "s/max_context=4096/max_context=$MAX_CTX/" export_rkllm.py
-
       - name: Convert to RKLLM
         env:
           MODEL_PATH: ./${{ env.MODEL_NAME }}
-        run: python3 export_rkllm.py
+          MAX_CONTEXT: ${{ github.event.inputs.max_context || '4096' }}
+        run: python3 export_rkllm_qwen25.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
