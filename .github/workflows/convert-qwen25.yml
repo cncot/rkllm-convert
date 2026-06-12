@@ -1,0 +1,75 @@
+name: Convert Qwen2.5-7B-Instruct to RKLLM
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_context:
+        description: 'Max context limit'
+        required: true
+        default: '4096'
+        type: choice
+        options:
+          - '2048'
+          - '4096'
+          - '8192'
+
+env:
+  MODEL_NAME: "Qwen2.5-7B-Instruct"
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install RKLLM-Toolkit
+        run: pip install rkllm_toolkit-1.2.3-cp311-cp311-linux_x86_64.whl
+
+      - name: Install huggingface_hub
+        run: pip install huggingface_hub
+
+      - name: Download model
+        run: |
+          python3 -c "
+from huggingface_hub import snapshot_download
+import os
+model = os.environ['MODEL_NAME']
+print(f'Downloading {model}...')
+snapshot_download(repo_id='Qwen/'+model, local_dir='./'+model, resume_download=True)
+print('Download complete!')
+"
+
+      - name: Convert to RKLLM
+        env:
+          MODEL_PATH: ./${{ env.MODEL_NAME }}
+          MAX_CTX: ${{ github.event.inputs.max_context || '4096' }}
+        run: |
+          # Modify export_rkllm.py to use Qwen2.5 settings
+          python3 -c "
+import re
+with open('export_rkllm.py') as f:
+    c = f.read()
+# Increase max_context from 4096 to user-selected value
+c = c.replace('max_context=4096', f'max_context={os.environ[\"MAX_CTX\"]}')
+with open('export_rkllm.py', 'w') as f:
+    f.write(c)
+print('Updated max_context to', os.environ['MAX_CTX'])
+"
+          python3 export_rkllm.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.MODEL_NAME }}_W8A8_RK3588_ctx${{ github.event.inputs.max_context || '4096' }}
+          path: ./*.rkllm
+          compression-level: 0
+
+      - name: Show output
+        run: |
+          ls -lh *.rkllm
+          echo "=== Done ==="
+          echo "Model: ${{ env.MODEL_NAME }}"
+          echo "Context: ${{ github.event.inputs.max_context || '4096' }}"
