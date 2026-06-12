@@ -42,23 +42,17 @@ snapshot_download(repo_id='Qwen/'+model, local_dir='./'+model, resume_download=T
 print('Download complete!')
 "
 
+      - name: Set max_context in export script
+        env:
+          MAX_CTX: ${{ github.event.inputs.max_context || '4096' }}
+        run: |
+          sed -i "s/max_context=4096/max_context=$MAX_CTX/" export_rkllm.py
+          echo "Set max_context=$MAX_CTX"
+
       - name: Convert to RKLLM
         env:
           MODEL_PATH: ./${{ env.MODEL_NAME }}
-          MAX_CTX: ${{ github.event.inputs.max_context || '4096' }}
-        run: |
-          # Modify export_rkllm.py to use Qwen2.5 settings
-          python3 -c "
-import re
-with open('export_rkllm.py') as f:
-    c = f.read()
-# Increase max_context from 4096 to user-selected value
-c = c.replace('max_context=4096', f'max_context={os.environ[\"MAX_CTX\"]}')
-with open('export_rkllm.py', 'w') as f:
-    f.write(c)
-print('Updated max_context to', os.environ['MAX_CTX'])
-"
-          python3 export_rkllm.py
+        run: python3 export_rkllm.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -71,5 +65,3 @@ print('Updated max_context to', os.environ['MAX_CTX'])
         run: |
           ls -lh *.rkllm
           echo "=== Done ==="
-          echo "Model: ${{ env.MODEL_NAME }}"
-          echo "Context: ${{ github.event.inputs.max_context || '4096' }}"
