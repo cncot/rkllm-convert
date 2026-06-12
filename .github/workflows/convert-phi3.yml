@@ -1,0 +1,61 @@
+name: Convert Phi-3-Mini-4K-Instruct to RKLLM (W8A8)
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_name:
+        description: 'HuggingFace model name'
+        required: true
+        default: 'microsoft/Phi-3-mini-4k-instruct'
+        type: string
+
+env:
+  MODEL_SHORT_NAME: "Phi-3-mini-4k-instruct"
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install RKLLM-Toolkit
+        run: |
+          pip install rkllm_toolkit-1.2.3-cp311-cp311-linux_x86_64.whl
+
+      - name: Download Phi-3-Mini from hf-mirror
+        env:
+          HF_ENDPOINT: "https://hf-mirror.com"
+        run: |
+          pip install -U huggingface_hub
+          huggingface-cli download ${{ inputs.model_name || 'microsoft/Phi-3-mini-4k-instruct' }} \
+            --local-dir ./${{ env.MODEL_SHORT_NAME }} \
+            --resume-download
+
+      - name: Verify model files
+        run: |
+          ls -lh ./${{ env.MODEL_SHORT_NAME }}/
+          echo "---"
+          du -sh ./${{ env.MODEL_SHORT_NAME }}/
+
+      - name: Convert to RKLLM (W8A8)
+        env:
+          MODEL_PATH: ./${{ env.MODEL_SHORT_NAME }}
+          RKLLM_DTYPE: auto
+        run: python export_rkllm.py
+
+      - name: List output
+        run: ls -lh ./*.rkllm
+
+      - name: Upload RKLLM model artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.MODEL_SHORT_NAME }}_W8A8_RK3588
+          path: ./*.rkllm
+          compression-level: 0
+          retention-days: 30

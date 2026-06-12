@@ -2,7 +2,7 @@ from rkllm.api import RKLLM
 import os
 
 modelpath = os.environ.get('MODEL_PATH', '/path/to/model')
-device = os.environ.get('RKLLM_DEVICE', 'cpu')
+device = os.environ.get('RKLLM_DEVICE', 'cuda')
 dtype = os.environ.get('RKLLM_DTYPE', 'float16')
 
 llm = RKLLM()
