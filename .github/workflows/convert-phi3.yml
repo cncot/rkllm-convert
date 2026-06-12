@@ -23,7 +23,7 @@ jobs:
         run: |
           pip install rkllm_toolkit-1.2.3-cp311-cp311-linux_x86_64.whl
 
-      - name: Download Phi-3-Mini from hf-mirror
+      - name: Download Phi-3-Mini from HuggingFace
         run: |
           pip install -U "huggingface_hub<0.28"
           huggingface-cli download ${{ env.MODEL_NAME }} \
