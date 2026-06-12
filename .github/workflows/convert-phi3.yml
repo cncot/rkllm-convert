@@ -25,7 +25,6 @@ jobs:
 
       - name: Download Phi-3-Mini from hf-mirror
         env:
-          HF_ENDPOINT: "https://hf-mirror.com"
         run: |
           pip install -U "huggingface_hub<0.28"
           huggingface-cli download ${{ env.MODEL_NAME }} \
