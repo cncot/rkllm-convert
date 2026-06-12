@@ -1,7 +1,9 @@
 name: Convert Phi-3-Mini-4K-Instruct to RKLLM (W8A8)
 
 on:
-  workflow_dispatch: {} # manual trigger
+  workflow_dispatch:
+  repository_dispatch:
+    types: [convert-phi3]
 
 env:
   MODEL_NAME: "microsoft/Phi-3-mini-4k-instruct"
@@ -26,8 +28,7 @@ jobs:
       - name: Download Phi-3-Mini via Python API
         run: |
           python3 -c "
-from huggingface_hub import snapshot_download, login
-# No login needed for public models
+from huggingface_hub import snapshot_download
 snapshot_download(\"${{ env.MODEL_NAME }}\", local_dir=\"./${{ env.MODEL_SHORT_NAME }}\")
 "
 
