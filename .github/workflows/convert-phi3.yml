@@ -19,15 +19,17 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install RKLLM-Toolkit
+      - name: Install RKLLM-Toolkit (includes transformers)
         run: |
           pip install rkllm_toolkit-1.2.3-cp311-cp311-linux_x86_64.whl
 
-      - name: Download Phi-3-Mini from HuggingFace
+      - name: Download Phi-3-Mini via Python API
         run: |
-          pip install -U "huggingface_hub<0.28"
-          huggingface-cli download ${{ env.MODEL_NAME }} \
-            --local-dir ./${{ env.MODEL_SHORT_NAME }}
+          python3 -c "
+from huggingface_hub import snapshot_download, login
+# No login needed for public models
+snapshot_download(\"${{ env.MODEL_NAME }}\", local_dir=\"./${{ env.MODEL_SHORT_NAME }}\")
+"
 
       - name: Verify model files
         run: |
