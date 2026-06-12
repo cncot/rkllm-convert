@@ -1,7 +1,7 @@
 name: Convert Phi-3-Mini-4K-Instruct to RKLLM (W8A8)
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {} # manual trigger
 
 env:
   MODEL_NAME: "microsoft/Phi-3-mini-4k-instruct"
