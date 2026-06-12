@@ -10,13 +10,14 @@ max_context = int(os.environ.get('MAX_CONTEXT', '4096'))
 
 llm = RKLLM()
 
-# Use low_cpu_mem_usage for 7B model in limited RAM
+# 7B model loading: uses swap space (~30GB peak) then releases
+# custom_config=None because RKLLM v1.2.3 doesn't support dict here
 ret = llm.load_huggingface(
     model=modelpath,
     model_lora=None,
     device='cpu',
     dtype='float16',
-    custom_config={'low_cpu_mem_usage': True},
+    custom_config=None,
     load_weight=True
 )
 if ret != 0:
