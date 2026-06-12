@@ -2,14 +2,9 @@ name: Convert Phi-3-Mini-4K-Instruct to RKLLM (W8A8)
 
 on:
   workflow_dispatch:
-    inputs:
-      model_name:
-        description: 'HuggingFace model name'
-        required: true
-        default: 'microsoft/Phi-3-mini-4k-instruct'
-        type: string
 
 env:
+  MODEL_NAME: "microsoft/Phi-3-mini-4k-instruct"
   MODEL_SHORT_NAME: "Phi-3-mini-4k-instruct"
 
 jobs:
@@ -32,21 +27,19 @@ jobs:
         env:
           HF_ENDPOINT: "https://hf-mirror.com"
         run: |
-          pip install -U huggingface_hub
-          hf download ${{ inputs.model_name || 'microsoft/Phi-3-mini-4k-instruct' }} \
-            --local-dir ./${{ env.MODEL_SHORT_NAME }} \
-            --resume-download
+          pip install -U "huggingface_hub<0.28"
+          huggingface-cli download ${{ env.MODEL_NAME }} \
+            --local-dir ./${{ env.MODEL_SHORT_NAME }}
 
       - name: Verify model files
         run: |
           ls -lh ./${{ env.MODEL_SHORT_NAME }}/
-          echo "---"
           du -sh ./${{ env.MODEL_SHORT_NAME }}/
 
       - name: Convert to RKLLM (W8A8)
         env:
           MODEL_PATH: ./${{ env.MODEL_SHORT_NAME }}
-          RKLLM_DTYPE: auto
+          RKLLM_DEVICE: cuda
         run: python export_rkllm.py
 
       - name: List output
