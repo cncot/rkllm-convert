@@ -36,7 +36,6 @@ on:
 
 env:
   REPO_URL: 'https://gitee.com/openharmony/manifest'
-  BUILD_TIMEOUT: 360   # 分钟
   CCACHE_DIR: /tmp/ccache
 
 concurrency:
@@ -46,7 +45,7 @@ concurrency:
 jobs:
   build:
     runs-on: ${{ inputs.runner_arch || 'ubuntu-22.04' }}
-    timeout-minutes: ${{ env.BUILD_TIMEOUT }}
+    timeout-minutes: 360
 
     steps:
       - name: ⚙️ 环境信息
