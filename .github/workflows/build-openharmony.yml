@@ -22,15 +22,13 @@ on:
           - ubuntu-22.04
           - ubuntu-24.04
       product_name:
-        description: '编译产品名 (Orange Pi 5 Plus = rk3588)'
+        description: '编译产品名'
         required: true
         default: 'rk3588'
       branch:
         description: 'OpenHarmony 分支'
         required: true
         default: 'OpenHarmony-5.0.3-Release'
-  schedule:
-    - cron: '0 8 1 * *'
 
 env:
   CCACHE_DIR: /tmp/ccache
@@ -59,7 +57,7 @@ jobs:
           sudo apt-get install -y -qq \
             binutils binutils-dev \
             build-essential bison flex \
-            python3 python3-pip python3-setuptools python3-wheel \
+            python3 python3-pip python3-setuptools python3-wheel python3-paramiko \
             ninja-build cmake ccache \
             git curl wget unzip zip \
             mtools dosfstools \
@@ -74,9 +72,7 @@ jobs:
           curl -sL https://mirrors.tuna.tsinghua.edu.cn/git/git-repo/repo -o /tmp/repo
           chmod +x /tmp/repo
           sudo mv /tmp/repo /usr/local/bin/repo
-          echo "repo version:"
-          file /usr/local/bin/repo
-          head -5 /usr/local/bin/repo
+          head -3 /usr/local/bin/repo
 
       - name: 🔧 配置 Git
         run: |
@@ -89,6 +85,7 @@ jobs:
           set -ex
           mkdir -p "${HOME}/openharmony"
           cd "${HOME}/openharmony"
+
           echo "=== repo init ==="
           repo init \
             -u https://gitee.com/openharmony/manifest \
@@ -96,33 +93,50 @@ jobs:
             --repo-url=https://mirrors.tuna.tsinghua.edu.cn/git/git-repo \
             --no-repo-verify \
             --depth=1 -q 2>&1
-          echo "=== repo init done ==="
+
           echo "=== repo sync ==="
           repo sync -c -j$(nproc --ignore=1) --no-tags --no-clone-bundle 2>&1
           echo "=== repo sync done ==="
 
-      - name: 📏 源码检查
+      - name: 🔍 源码结构诊断
+        shell: bash
         run: |
+          set -ex
           cd "${HOME}/openharmony"
-          echo "Source size: $(du -sh . | awk '{print $1}')"
-          echo "File count: $(find . -type f | wc -l)"
-          ls -d device/*/* 2>/dev/null | head -10 || echo "no device dir"
-          find . -maxdepth 3 -name "product_name" -o -name "*.json" 2>/dev/null | head -10 || true
+          echo "=== top-level files/dirs ==="
+          ls -la
+          echo "=== build scripts ==="
+          ls -la build.* Makefile* 2>/dev/null || echo "no build scripts at root"
+          find . -maxdepth 1 -type f -executable 2>/dev/null | head -10
+          echo "=== build/ directory ==="
+          ls build/ 2>/dev/null | head -20 || echo "no build/ dir"
+          find . -name "build.sh" -o -name "build.py" 2>/dev/null | head -10
+          echo "=== Device configs ==="
+          ls -la device/ 2>/dev/null || echo "no device/ dir"
+          find device -maxdepth 3 -name "*.json" 2>/dev/null | head -15
 
-      - name: 📥 安装编译工具链 (prebuilts)
+      - name: 📥 安装编译工具链
+        shell: bash
         run: |
+          set -ex
           cd "${HOME}/openharmony"
+
+          # OpenHarmony 5.0.3 可能无 prebuilts_download.sh，用 python 脚本
           if [ -f build/prebuilts_download.sh ]; then
             bash build/prebuilts_download.sh 2>&1
+          elif [ -f build/prebuilts_download.py ]; then
+            python3 build/prebuilts_download.py 2>&1
           else
-            echo "No prebuilts_download.sh found"
+            echo "No prebuilts_download script. Checking prebuilts/..."
+            ls prebuilts/ 2>/dev/null | head -10 || echo "no prebuilts/"
           fi
 
       - name: 💾 CCache 缓存
         uses: actions/cache@v4
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ohos-ccache-${{ inputs.product_name }}-${{ hashFiles('**/build/**') }}
+          key: ohos-ccache-${{ inputs.product_name }}-${{
+            hashFiles('build/**', 'device/**', 'kernel/**') }}
           restore-keys: |
             ohos-ccache-${{ inputs.product_name }}-
             ohos-ccache-
@@ -130,39 +144,66 @@ jobs:
       - name: 🔨 编译 OpenHarmony
         shell: bash
         run: |
+          set -ex
           cd "${HOME}/openharmony"
+
           export CCACHE_DIR="${{ env.CCACHE_DIR }}"
           export CCACHE_COMPRESS=1
           export CCACHE_COMPRESSLEVEL=6
           export CCACHE_MAXSIZE=10G
 
-          echo "=== Starting build: ${{ inputs.product_name }} ==="
+          echo "=== Source tree ==="
+          du -sh .
+          echo "=== Detecting build method ==="
+
           build_start=$(date +%s)
 
-          ./build.sh \
-            --product-name "${{ inputs.product_name }}" \
-            --ccache \
-            --jobs $(nproc --ignore=1) \
-            2>&1 | tee build.log
+          # OpenHarmony 5.x build 入口探测
+          if [ -x ./build.sh ]; then
+            echo "Using: ./build.sh --product-name ${{ inputs.product_name }}"
+            ./build.sh \
+              --product-name "${{ inputs.product_name }}" \
+              --ccache \
+              --jobs $(nproc --ignore=1) \
+              2>&1 | tee build.log
+          elif [ -x build/build.sh ]; then
+            echo "Using: build/build.sh --product-name ${{ inputs.product_name }}"
+            build/build.sh \
+              --product-name "${{ inputs.product_name }}" \
+              --ccache \
+              --jobs $(nproc --ignore=1) \
+              2>&1 | tee build.log
+          elif [ -f build.py ]; then
+            echo "Using: python3 build.py"
+            python3 build.py \
+              --product-name "${{ inputs.product_name }}" \
+              --ccache \
+              --jobs $(nproc --ignore=1) \
+              2>&1 | tee build.log
+          else
+            echo "No recognized build script found."
+            echo "Available scripts:"
+            find . -maxdepth 2 -name "build*" -type f 2>/dev/null | head -20
+            exit 1
+          fi
 
           build_exit=${PIPESTATUS[0]}
           build_end=$(date +%s)
           echo "BUILD_EXIT=${build_exit}" >> "${GITHUB_ENV}"
           echo "BUILD_DURATION=$((build_end - build_start))s" >> "${GITHUB_ENV}"
-          echo "=== Build finished: exit=${build_exit} ==="
 
       - name: 📊 收集构建产物
         if: always()
+        shell: bash
         run: |
           cd "${HOME}/openharmony"
           mkdir -p "${HOME}/artifacts"
 
           echo "=== Looking for images ==="
           find out -name "*.img" -type f 2>/dev/null | head -20 || echo "No images found"
+          find . -name "*.img" -type f 2>/dev/null | head -20 || echo "No images at all"
           find out -name "*.bin" -type f 2>/dev/null | head -10 || true
-          find out -name "*.part" -type f 2>/dev/null | head -10 || true
 
-          echo "=== Copying images ==="
           for img in $(find out -name "*.img" -type f 2>/dev/null); do
             echo "Copying: ${img}"
             cp "${img}" "${HOME}/artifacts/" 2>/dev/null || true
@@ -172,7 +213,6 @@ jobs:
             cp build.log "${HOME}/artifacts/"
           fi
 
-          echo "=== Artifacts ==="
           ls -lh "${HOME}/artifacts/" 2>/dev/null || echo "(empty)"
 
       - name: 📤 上传构建产物
@@ -180,20 +220,20 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: OpenHarmony-${{ inputs.product_name }}-${{ github.run_id }}
-          path: ${{ env.HOME }}/artifacts/
+          path: ${{ runner.temp }}/../artifacts/
           retention-days: 7
           compression-level: 6
 
       - name: 📝 构建摘要
         if: always()
+        shell: bash
         run: |
-          {
-            echo "## Build Summary"
-            echo ""
-            echo "| Item | Value |"
-            echo "|------|-------|"
-            echo "| **Status** | ${{ env.BUILD_EXIT == '0' && '✅ Success' || '❌ Failed' }} |"
-            echo "| **Duration** | ${{ env.BUILD_DURATION }} |"
-            echo "| **Product** | ${{ inputs.product_name }} |"
-            echo "| **Branch** | ${{ inputs.branch }} |"
-          } >> "${GITHUB_STEP_SUMMARY}"
+          cat >> "${GITHUB_STEP_SUMMARY}" <<'SUMEOF'
+          ## Build Summary
+          | Item | Value |
+          |------|-------|
+          | **Status** | ${{ env.BUILD_EXIT == '0' && '✅ Success' || '❌ Failed' }} |
+          | **Duration** | ${{ env.BUILD_DURATION }} |
+          | **Product** | ${{ inputs.product_name }} |
+          | **Branch** | ${{ inputs.branch }} |
+          SUMEOF
