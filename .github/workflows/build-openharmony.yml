@@ -1,0 +1,205 @@
+# Build OpenHarmony 5.0.3 for Orange Pi 5 Plus (RK3588)
+#
+# 使用方法：
+# 1. 将此文件放到 .github/workflows/ 目录下
+# 2. Fork/Push 到你的 GitHub 仓库
+# 3. Actions → "Build OpenHarmony" → Run workflow
+# 4. 输入: 选 ARM64 runners（跑在 16 核 ARM runner 上）或 x86_64
+#
+# 产物: 生成可烧录固件 .img 文件
+# 注意: 源码拉取 + 编译约需 3–5 小时（取决于 Runner 性能）
+
+name: Build OpenHarmony
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_arch:
+        description: 'Runner 架构'
+        required: true
+        default: 'ubuntu-22.04'
+        type: choice
+        options:
+          - ubuntu-22.04
+          - ubuntu-24.04
+      product_name:
+        description: '编译产品名 (Orange Pi 5 Plus = rk3588)'
+        required: true
+        default: 'rk3588'
+      branch:
+        description: 'OpenHarmony 分支'
+        required: true
+        default: 'OpenHarmony-5.0.3-Release'
+  schedule:
+    # 每月一号 08:00 自动编译（可选）
+    - cron: '0 8 1 * *'
+
+env:
+  REPO_URL: 'https://gitee.com/openharmony/manifest'
+  BUILD_TIMEOUT: 360   # 分钟
+  CCACHE_DIR: /tmp/ccache
+
+concurrency:
+  group: build-openharmony-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runner_arch || 'ubuntu-22.04' }}
+    timeout-minutes: ${{ env.BUILD_TIMEOUT }}
+
+    steps:
+      - name: ⚙️ 环境信息
+        run: |
+            echo "CPU: $(nproc) cores"
+            echo "RAM: $(free -h | awk '/^Mem:/{print $2}')"
+            echo "Disk: $(df -h / | awk 'NR==2{print $4}')"
+            echo "Product: ${{ inputs.product_name }}"
+            echo "Branch: ${{ inputs.branch }}"
+            echo "Arch: $(uname -m)"
+
+      - name: 📦 安装编译依赖
+        run: |
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq \
+                binutils binutils-dev \
+                build-essential bison flex \
+                python3 python3-pip python3-setuptools python3-wheel \
+                ninja-build cmake ccache \
+                git curl wget unzip zip \
+                mtools dosfstools \
+                libssl-dev libncurses5-dev liblz4-tool \
+                libffi-dev libelf-dev libudev-dev libpci-dev \
+                libgmp-dev libmpfr-dev libmpc-dev \
+                file tree
+            sudo pip3 install --quiet setuptools wheel
+
+      - name: 🛠 安装 repo 工具
+        run: |
+            curl -s https://storage.googleapis.com/git-repo-downloads/repo > /tmp/repo
+            chmod +x /tmp/repo
+            sudo mv /tmp/repo /usr/local/bin/repo
+
+      - name: 🔧 配置 Git
+        run: |
+            git config --global user.name "Builder"
+            git config --global user.email "builder@localhost"
+            git config --global credential.helper cache
+
+      - name: 📥 获取 OpenHarmony 源码
+        run: |
+            mkdir -p $HOME/openharmony
+            cd $HOME/openharmony
+            echo "repo init (branch=${{ inputs.branch }})..."
+            repo init -u ${{ env.REPO_URL }} -b ${{ inputs.branch }} --depth=1 -q
+            echo "repo sync (this may take 30-60 minutes)..."
+            repo sync -c -j$(nproc --ignore=1) --no-tags --no-clone-bundle 2>&1
+
+      - name: 📏 源码检查
+        run: |
+            cd $HOME/openharmony
+            echo "Source size: $(du -sh . | awk '{print $1}')"
+            echo "File count: $(find . -type f | wc -l)"
+            echo "=== 产品设备列表 ==="
+            ls -d device/*/* 2>/dev/null | head -20 || echo "(no device directory)"
+            echo "=== 产品配置 ==="
+            find . -path "*/product/*" -name "*.json" 2>/dev/null | head -10 || echo "(no product configs)"
+
+      - name: 📥 安装编译工具链
+        run: |
+            cd $HOME/openharmony
+            # OpenHarmony 预置的 gn/ninja
+            if [ -f build/prebuilts_download.sh ]; then
+                bash build/prebuilts_download.sh 2>&1
+            fi
+            # 检查是否有预置 clang
+            if [ -d prebuilts/clang ]; then
+                echo "Clang: $(ls prebuilts/clang/ 2>/dev/null)"
+            fi
+
+      - name: 💾 CCache 缓存
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ohos-ccache-${{ inputs.product_name }}-${{ hashFiles('**/build/**') }}
+          restore-keys: |
+            ohos-ccache-${{ inputs.product_name }}-
+            ohos-ccache-
+
+      - name: 🔨 编译 OpenHarmony
+        run: |
+            cd $HOME/openharmony
+            export CCACHE_DIR=${{ env.CCACHE_DIR }}
+            export CCACHE_COMPRESS=1
+            export CCACHE_COMPRESSLEVEL=6
+            export CCACHE_MAXSIZE=10G
+
+            echo "=== Starting build: ${{ inputs.product_name }} ==="
+            build_start=$(date +%s)
+
+            ./build.sh --product-name ${{ inputs.product_name }} \
+                       --ccache \
+                       --jobs $(nproc --ignore=1) \
+                       2>&1 | tee build.log
+
+            build_exit=${PIPESTATUS[0]}
+            build_end=$(date +%s)
+            echo "BUILD_EXIT=$build_exit" >> $GITHUB_ENV
+            echo "BUILD_DURATION=$((build_end - build_start))s" >> $GITHUB_ENV
+
+      - name: 📊 收集构建产物
+        if: always()
+        run: |
+            cd $HOME/openharmony
+
+            echo "=== Build exit: ${{ env.BUILD_EXIT }} ==="
+            echo "=== Duration: ${{ env.BUILD_DURATION }} ==="
+
+            mkdir -p $HOME/artifacts
+
+            # 查找生成的镜像文件
+            echo "=== 查找镜像文件 ==="
+            find out -name "*.img" -type f 2>/dev/null | head -20
+            find out -name "*.bin" -type f 2>/dev/null | head -10
+            find out -name "*.part" -type f 2>/dev/null | head -10
+
+            # 复制镜像到 artifacts
+            for img in $(find out -name "*.img" -type f 2>/dev/null); do
+                echo "Copying: $img"
+                cp "$img" $HOME/artifacts/ 2>/dev/null || true
+            done
+
+            # 复制构建日志
+            cp build.log $HOME/artifacts/ 2>/dev/null || true
+            find out -name "build.prof" -o -name "*.log" -type f 2>/dev/null | head -5 | \
+                while read f; do cp "$f" $HOME/artifacts/ 2>/dev/null || true; done
+
+            echo "=== 产物列表 ==="
+            ls -lh $HOME/artifacts/
+
+      - name: 📤 上传构建产物
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenHarmony-${{ inputs.product_name }}-${{ github.run_id }}
+          path: $HOME/artifacts/
+          retention-days: 7
+          compression-level: 6
+
+      - name: 📝 构建摘要
+        if: always()
+        run: |
+            echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| **Status** | ${{ env.BUILD_EXIT == '0' && '✅ Success' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Duration** | ${{ env.BUILD_DURATION }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Product** | ${{ inputs.product_name }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Branch** | ${{ inputs.branch }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Runner** | ${{ runner.name }} (${{ runner.os }}) |" >> $GITHUB_STEP_SUMMARY
+
+      - name: 🔔 通知
+        if: failure()
+        run: |
+            echo "Build failed! Check details: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
