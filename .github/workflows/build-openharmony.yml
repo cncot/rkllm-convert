@@ -1,13 +1,4 @@
 # Build OpenHarmony 5.0.3 for Orange Pi 5 Plus (RK3588)
-#
-# 使用方法：
-# 1. 将此文件放到 .github/workflows/ 目录下
-# 2. Fork/Push 到你的 GitHub 仓库
-# 3. Actions → "Build OpenHarmony" → Run workflow
-#
-# 产物: 生成可烧录固件 .img 文件（上传至 Artifacts）
-# 注意: 源码拉取 + 编译约需 3–5 小时
-
 name: Build OpenHarmony
 
 on:
@@ -72,7 +63,7 @@ jobs:
           curl -sL https://mirrors.tuna.tsinghua.edu.cn/git/git-repo/repo -o /tmp/repo
           chmod +x /tmp/repo
           sudo mv /tmp/repo /usr/local/bin/repo
-          head -3 /usr/local/bin/repo
+          python3 /usr/local/bin/repo --version
 
       - name: 🔧 配置 Git
         run: |
@@ -86,57 +77,64 @@ jobs:
           mkdir -p "${HOME}/openharmony"
           cd "${HOME}/openharmony"
 
-          echo "=== repo init ==="
+          echo '=== repo init ==='
           repo init \
             -u https://gitee.com/openharmony/manifest \
             -b "${{ inputs.branch }}" \
             --repo-url=https://mirrors.tuna.tsinghua.edu.cn/git/git-repo \
-            --no-repo-verify \
-            --depth=1 -q 2>&1
+            --no-repo-verify 2>&1
 
-          echo "=== repo sync ==="
-          repo sync -c -j$(nproc --ignore=1) --no-tags --no-clone-bundle 2>&1
-          echo "=== repo sync done ==="
+          echo '=== .repo manifest ==='
+          ls -la .repo/
+          if [ -f .repo/manifest.xml ]; then
+            echo '--- manifest.xml (first 50 lines) ---'
+            head -50 .repo/manifest.xml
+          fi
+          if [ -f .repo/manifests/default.xml ]; then
+            echo '--- default.xml (first 50 lines) ---'
+            head -50 .repo/manifests/default.xml
+          fi
+          # also check manifests.git
+          find .repo -name "*.xml" -type f 2>/dev/null | head -5
 
-      - name: 🔍 源码结构诊断
+          echo '=== repo sync ==='
+          # sync with full output, 4 parallel jobs
+          repo sync -c -j4 --no-tags --no-clone-bundle -v 2>&1
+          sync_exit=$?
+          echo "repo sync exit: ${sync_exit}"
+
+          echo '=== working tree after sync ==='
+          ls -la
+          echo '--- directories ---'
+          find . -maxdepth 2 -type d ! -path './.repo/*' 2>/dev/null | head -40 || echo '(empty)'
+          du -sh . 2>/dev/null || true
+
+      - name: 🔍 源码诊断
         shell: bash
         run: |
-          set -ex
           cd "${HOME}/openharmony"
-          echo "=== top-level files/dirs ==="
-          ls -la
+          echo "=== top level ==="
+          find . -maxdepth 1 ! -name '.repo' ! -name '.' | head -40
           echo "=== build scripts ==="
-          ls -la build.* Makefile* 2>/dev/null || echo "no build scripts at root"
-          find . -maxdepth 1 -type f -executable 2>/dev/null | head -10
-          echo "=== build/ directory ==="
-          ls build/ 2>/dev/null | head -20 || echo "no build/ dir"
-          find . -name "build.sh" -o -name "build.py" 2>/dev/null | head -10
-          echo "=== Device configs ==="
-          ls -la device/ 2>/dev/null || echo "no device/ dir"
-          find device -maxdepth 3 -name "*.json" 2>/dev/null | head -15
+          find . -maxdepth 3 -name 'build.sh' -o -name 'build.py' -o -name '*.gni' 2>/dev/null | head -20
+          echo "=== device dir ==="
+          find . -maxdepth 3 -type d -name 'device' 2>/dev/null | head -5
+          echo "=== total size ==="
+          du -sh . 2>/dev/null || true
 
       - name: 📥 安装编译工具链
         shell: bash
         run: |
-          set -ex
-          cd "${HOME}/openharmony"
-
-          # OpenHarmony 5.0.3 可能无 prebuilts_download.sh，用 python 脚本
-          if [ -f build/prebuilts_download.sh ]; then
-            bash build/prebuilts_download.sh 2>&1
-          elif [ -f build/prebuilts_download.py ]; then
-            python3 build/prebuilts_download.py 2>&1
-          else
-            echo "No prebuilts_download script. Checking prebuilts/..."
-            ls prebuilts/ 2>/dev/null | head -10 || echo "no prebuilts/"
-          fi
+          cd "${HOME}/openharmony" || exit 0
+          test -f build/prebuilts_download.sh && bash build/prebuilts_download.sh 2>&1 || \
+          test -f build/prebuilts_download.py && python3 build/prebuilts_download.py 2>&1 || \
+          echo "[SKIP] no prebuilts download script found"
 
       - name: 💾 CCache 缓存
         uses: actions/cache@v4
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ohos-ccache-${{ inputs.product_name }}-${{
-            hashFiles('build/**', 'device/**', 'kernel/**') }}
+          key: ohos-ccache-${{ inputs.product_name }}-${{ hashFiles('build/**', 'kernel/**', 'device/**') }}
           restore-keys: |
             ohos-ccache-${{ inputs.product_name }}-
             ohos-ccache-
@@ -152,45 +150,28 @@ jobs:
           export CCACHE_COMPRESSLEVEL=6
           export CCACHE_MAXSIZE=10G
 
-          echo "=== Source tree ==="
-          du -sh .
-          echo "=== Detecting build method ==="
-
           build_start=$(date +%s)
 
-          # OpenHarmony 5.x build 入口探测
-          if [ -x ./build.sh ]; then
-            echo "Using: ./build.sh --product-name ${{ inputs.product_name }}"
-            ./build.sh \
-              --product-name "${{ inputs.product_name }}" \
-              --ccache \
-              --jobs $(nproc --ignore=1) \
-              2>&1 | tee build.log
-          elif [ -x build/build.sh ]; then
-            echo "Using: build/build.sh --product-name ${{ inputs.product_name }}"
-            build/build.sh \
-              --product-name "${{ inputs.product_name }}" \
-              --ccache \
-              --jobs $(nproc --ignore=1) \
-              2>&1 | tee build.log
-          elif [ -f build.py ]; then
-            echo "Using: python3 build.py"
-            python3 build.py \
+          SCRIPT=""
+          test -x ./build.sh && SCRIPT="./build.sh"
+          test -z "$SCRIPT" && test -x build/build.sh && SCRIPT="build/build.sh"
+          test -z "$SCRIPT" && test -f build.py && SCRIPT="python3 build.py"
+
+          if [ -n "$SCRIPT" ]; then
+            echo "Using: ${SCRIPT} --product-name ${{ inputs.product_name }}"
+            ${SCRIPT} \
               --product-name "${{ inputs.product_name }}" \
               --ccache \
               --jobs $(nproc --ignore=1) \
               2>&1 | tee build.log
           else
-            echo "No recognized build script found."
-            echo "Available scripts:"
-            find . -maxdepth 2 -name "build*" -type f 2>/dev/null | head -20
+            echo "No build script found. Listing available scripts:"
+            find . -maxdepth 3 -type f \( -name 'build*' -o -name '*.sh' -o -name '*.py' \) 2>/dev/null | grep -v '.repo/' | head -30
             exit 1
           fi
 
-          build_exit=${PIPESTATUS[0]}
-          build_end=$(date +%s)
-          echo "BUILD_EXIT=${build_exit}" >> "${GITHUB_ENV}"
-          echo "BUILD_DURATION=$((build_end - build_start))s" >> "${GITHUB_ENV}"
+          echo "BUILD_EXIT=${PIPESTATUS[0]}" >> "${GITHUB_ENV}"
+          echo "BUILD_DURATION=$(( $(date +%s) - build_start ))s" >> "${GITHUB_ENV}"
 
       - name: 📊 收集构建产物
         if: always()
@@ -198,22 +179,12 @@ jobs:
         run: |
           cd "${HOME}/openharmony"
           mkdir -p "${HOME}/artifacts"
-
-          echo "=== Looking for images ==="
-          find out -name "*.img" -type f 2>/dev/null | head -20 || echo "No images found"
-          find . -name "*.img" -type f 2>/dev/null | head -20 || echo "No images at all"
-          find out -name "*.bin" -type f 2>/dev/null | head -10 || true
-
-          for img in $(find out -name "*.img" -type f 2>/dev/null); do
-            echo "Copying: ${img}"
-            cp "${img}" "${HOME}/artifacts/" 2>/dev/null || true
+          find . -name "*.img" -type f 2>/dev/null | head -20
+          find . -name "*.img" -type f 2>/dev/null | while read f; do
+            cp "$f" "${HOME}/artifacts/" 2>/dev/null || true
           done
-
-          if [ -f build.log ]; then
-            cp build.log "${HOME}/artifacts/"
-          fi
-
-          ls -lh "${HOME}/artifacts/" 2>/dev/null || echo "(empty)"
+          test -f build.log && cp build.log "${HOME}/artifacts/"
+          ls -lh "${HOME}/artifacts/" || echo "(empty)"
 
       - name: 📤 上传构建产物
         if: always()
@@ -222,18 +193,14 @@ jobs:
           name: OpenHarmony-${{ inputs.product_name }}-${{ github.run_id }}
           path: ${{ runner.temp }}/../artifacts/
           retention-days: 7
-          compression-level: 6
 
       - name: 📝 构建摘要
         if: always()
-        shell: bash
         run: |
-          cat >> "${GITHUB_STEP_SUMMARY}" <<'SUMEOF'
+          cat >> "${GITHUB_STEP_SUMMARY}" <<'EOF'
           ## Build Summary
-          | Item | Value |
-          |------|-------|
-          | **Status** | ${{ env.BUILD_EXIT == '0' && '✅ Success' || '❌ Failed' }} |
-          | **Duration** | ${{ env.BUILD_DURATION }} |
-          | **Product** | ${{ inputs.product_name }} |
-          | **Branch** | ${{ inputs.branch }} |
-          SUMEOF
+          - **Status**: ${{ env.BUILD_EXIT == '0' && '✅ Success' || '❌ Failed' }}
+          - **Duration**: ${{ env.BUILD_DURATION }}
+          - **Product**: ${{ inputs.product_name }}
+          - **Branch**: ${{ inputs.branch }}
+          EOF
