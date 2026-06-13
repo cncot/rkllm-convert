@@ -4,7 +4,6 @@
 # 1. 将此文件放到 .github/workflows/ 目录下
 # 2. Fork/Push 到你的 GitHub 仓库
 # 3. Actions → "Build OpenHarmony" → Run workflow
-# 4. 输入: 选 ARM64 runners（跑在 16 核 ARM runner 上）或 x86_64
 #
 # 产物: 生成可烧录固件 .img 文件
 # 注意: 源码拉取 + 编译约需 3–5 小时（取决于 Runner 性能）
@@ -31,11 +30,9 @@ on:
         required: true
         default: 'OpenHarmony-5.0.3-Release'
   schedule:
-    # 每月一号 08:00 自动编译（可选）
     - cron: '0 8 1 * *'
 
 env:
-  REPO_URL: 'https://gitee.com/openharmony/manifest'
   CCACHE_DIR: /tmp/ccache
 
 concurrency:
@@ -55,7 +52,6 @@ jobs:
             echo "Disk: $(df -h / | awk 'NR==2{print $4}')"
             echo "Product: ${{ inputs.product_name }}"
             echo "Branch: ${{ inputs.branch }}"
-            echo "Arch: $(uname -m)"
 
       - name: 📦 安装编译依赖
         run: |
@@ -75,7 +71,10 @@ jobs:
 
       - name: 🛠 安装 repo 工具
         run: |
-            curl -s https://storage.googleapis.com/git-repo-downloads/repo > /tmp/repo
+            # 从 TUNA 镜像下载 repo（国内可用）
+            curl -sL \
+              https://mirrors.tuna.tsinghua.edu.cn/git/git-repo/repo \
+              -o /tmp/repo
             chmod +x /tmp/repo
             sudo mv /tmp/repo /usr/local/bin/repo
 
@@ -83,14 +82,21 @@ jobs:
         run: |
             git config --global user.name "Builder"
             git config --global user.email "builder@localhost"
-            git config --global credential.helper cache
 
       - name: 📥 获取 OpenHarmony 源码
         run: |
             mkdir -p $HOME/openharmony
             cd $HOME/openharmony
-            echo "repo init (branch=${{ inputs.branch }})..."
-            repo init -u ${{ env.REPO_URL }} -b ${{ inputs.branch }} --depth=1 -q
+
+            echo "repo init (branch=${{ inputs.branch }}, TUNA mirror)..."
+            # 使用 TUNA 镜像拉 repo 自身 + 清华 AOSP 镜像
+            repo init \
+                -u ${{ env.REPO_URL || 'https://gitee.com/openharmony/manifest' }} \
+                -b ${{ inputs.branch }} \
+                --repo-url=https://mirrors.tuna.tsinghua.edu.cn/git/git-repo \
+                --no-repo-verify \
+                --depth=1 -q 2>&1
+
             echo "repo sync (this may take 30-60 minutes)..."
             repo sync -c -j$(nproc --ignore=1) --no-tags --no-clone-bundle 2>&1
 
@@ -99,21 +105,12 @@ jobs:
             cd $HOME/openharmony
             echo "Source size: $(du -sh . | awk '{print $1}')"
             echo "File count: $(find . -type f | wc -l)"
-            echo "=== 产品设备列表 ==="
-            ls -d device/*/* 2>/dev/null | head -20 || echo "(no device directory)"
-            echo "=== 产品配置 ==="
-            find . -path "*/product/*" -name "*.json" 2>/dev/null | head -10 || echo "(no product configs)"
 
       - name: 📥 安装编译工具链
         run: |
             cd $HOME/openharmony
-            # OpenHarmony 预置的 gn/ninja
             if [ -f build/prebuilts_download.sh ]; then
                 bash build/prebuilts_download.sh 2>&1
-            fi
-            # 检查是否有预置 clang
-            if [ -d prebuilts/clang ]; then
-                echo "Clang: $(ls prebuilts/clang/ 2>/dev/null)"
             fi
 
       - name: 💾 CCache 缓存
@@ -150,19 +147,12 @@ jobs:
         if: always()
         run: |
             cd $HOME/openharmony
-
             echo "=== Build exit: ${{ env.BUILD_EXIT }} ==="
             echo "=== Duration: ${{ env.BUILD_DURATION }} ==="
 
             mkdir -p $HOME/artifacts
 
             # 查找生成的镜像文件
-            echo "=== 查找镜像文件 ==="
-            find out -name "*.img" -type f 2>/dev/null | head -20
-            find out -name "*.bin" -type f 2>/dev/null | head -10
-            find out -name "*.part" -type f 2>/dev/null | head -10
-
-            # 复制镜像到 artifacts
             for img in $(find out -name "*.img" -type f 2>/dev/null); do
                 echo "Copying: $img"
                 cp "$img" $HOME/artifacts/ 2>/dev/null || true
@@ -170,8 +160,6 @@ jobs:
 
             # 复制构建日志
             cp build.log $HOME/artifacts/ 2>/dev/null || true
-            find out -name "build.prof" -o -name "*.log" -type f 2>/dev/null | head -5 | \
-                while read f; do cp "$f" $HOME/artifacts/ 2>/dev/null || true; done
 
             echo "=== 产物列表 ==="
             ls -lh $HOME/artifacts/
@@ -196,9 +184,3 @@ jobs:
             echo "| **Duration** | ${{ env.BUILD_DURATION }} |" >> $GITHUB_STEP_SUMMARY
             echo "| **Product** | ${{ inputs.product_name }} |" >> $GITHUB_STEP_SUMMARY
             echo "| **Branch** | ${{ inputs.branch }} |" >> $GITHUB_STEP_SUMMARY
-            echo "| **Runner** | ${{ runner.name }} (${{ runner.os }}) |" >> $GITHUB_STEP_SUMMARY
-
-      - name: 🔔 通知
-        if: failure()
-        run: |
-            echo "Build failed! Check details: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
