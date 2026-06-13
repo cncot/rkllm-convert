@@ -1,32 +1,21 @@
-# Build OpenHarmony 5.1.0 for Orange Pi 5 Plus (opc vendor)
+# Build OpenHarmony 5.1.0 for Orange Pi 5 Plus
 #
-# 基于 OPC (OpenHarmony Porting Community) 适配方案:
-#   https://gitee.com/ohos-porting-communities/vendor_opc
-#   https://gitee.com/ohos-porting-communities/device_board_opc
-#   https://gitee.com/ohos-porting-communities/device_soc_opc
-#
-# 产物: out/{product}/packages/phone/images/
+# OPC 适配: https://gitcode.com/ohos-porting-communities/vendor_opc
 name: Build OpenHarmony
 
 on:
   workflow_dispatch:
     inputs:
-      runner_arch:
-        description: 'Runner 架构'
-        required: true
-        default: 'ubuntu-22.04'
-        type: choice
-        options:
-          - ubuntu-20.04
-          - ubuntu-22.04
       product_name:
-        description: '产品名 (opi5plus/opi5ultra/f12/rpi4/beryllium/sagit)'
+        description: '产品名'
         required: true
         default: 'opi5plus'
       branch:
         description: 'OpenHarmony 分支'
         required: true
         default: 'OpenHarmony-5.1.0-Release'
+  schedule:
+    - cron: '0 8 1 * *'
 
 env:
   CCACHE_DIR: /tmp/ccache
@@ -38,7 +27,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ${{ inputs.runner_arch || 'ubuntu-22.04' }}
+    runs-on: ubuntu-22.04
     timeout-minutes: 360
 
     steps:
@@ -48,7 +37,6 @@ jobs:
           echo "RAM: $(free -h | awk '/^Mem:/{print $2}')"
           echo "Disk: $(df -h / | awk 'NR==2{print $4}')"
           echo "Product: ${{ inputs.product_name }}"
-          echo "Branch: ${{ inputs.branch }}"
 
       - name: 📦 安装编译依赖
         run: |
@@ -56,25 +44,34 @@ jobs:
           sudo apt-get install -y -qq \
             binutils git git-lfs gnupg flex bison gperf \
             build-essential zip curl zlib1g-dev \
-            gcc-multilib g++-multilib libc6-dev-i386 \
-            lib32ncurses5-dev x11proto-core-dev libx11-dev \
-            lib32z1-dev ccache libgl1-mesa-dev libxml2-utils \
-            xsltproc unzip m4 bc gnutls-bin \
-            python3.8 python3-pip ruby default-jdk \
-            libssl-dev libtinfo5 genext2fs u-boot-tools \
-            mtools mtd-utils scons gcc-arm-none-eabi \
+            ccache libxml2-utils xsltproc unzip m4 bc \
+            python3-pip ruby default-jdk \
+            libssl-dev libtinfo5 \
+            mtools dosfstools scons \
             abootimg libelf-dev libxcursor-dev libxrandr-dev \
-            libxinerma-dev \
-            mtools dosfstools \
-            file tree
+            libxinerama-dev file tree \
+            genext2fs u-boot-tools mtd-utils \
+            libgl1-mesa-dev gnutls-bin 2>&1
+
+          sudo dpkg --add-architecture i386
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            lib32ncurses5-dev lib32z1-dev libc6-dev-i386 \
+            gcc-multilib g++-multilib 2>&1 || echo '[WARN] 32-bit deps failed'
+
+          sudo apt-get install -y -qq gcc-arm-none-eabi 2>&1 || \
+          ( sudo add-apt-repository -y ppa:team-gcc-arm-embedded/ppa 2>/dev/null
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq gcc-arm-none-eabi 2>&1 ) || \
+          echo '[WARN] gcc-arm-none-eabi not available'
+
           sudo pip3 install --quiet setuptools wheel requests
 
-      - name: 🛠 安装 Gitee repo 工具
+      - name: 🛠 安装 repo 工具
         run: |
-          curl -s https://gitee.com/oschina/repo/raw/fork_flow/repo-py3 -o /tmp/repo
+          curl -sL https://storage.googleapis.com/git-repo-downloads/repo -o /tmp/repo
           chmod +x /tmp/repo
           sudo mv /tmp/repo /usr/local/bin/repo
-          python3 /usr/local/bin/repo --version
 
       - name: 🔧 配置 Git
         run: |
@@ -85,59 +82,37 @@ jobs:
         shell: bash
         run: |
           set -ex
-
           mkdir -p "${HOME}/openharmony"
           cd "${HOME}/openharmony"
 
-          # ── repo init + sync (MANIFEST from Gitee) ──
-          echo '=== repo init (Gitee manifest, tag based) ==='
+          # OpenHarmony manifest (gitcode)
+          echo '=== repo init ==='
           repo init \
-            -u https://gitee.com/openharmony/manifest.git \
+            -u https://gitcode.com/openharmony/manifest \
             -b refs/tags/${{ env.TAG }} \
             --no-repo-verify 2>&1
 
           echo '=== repo sync ==='
           repo sync -c -j$(nproc --ignore=1) --no-tags --no-clone-bundle 2>&1
-          echo '=== git lfs pull ==='
-          repo forall -c 'git lfs pull' 2>&1 || echo '[SKIP] git lfs pull failed (not fatal)'
 
-          # ── OPC 设备适配代码 ──
-          echo '=== Clone OPC vendor/device/kernel ==='
-
-          # 厂商适配层
+          # OPC 适配代码 (全部从 gitcode)
+          echo '=== Clone OPC repos ==='
           git clone -b ${{ inputs.branch }} --depth=1 \
-            https://gitee.com/ohos-porting-communities/vendor_opc.git \
+            https://gitcode.com/ohos-porting-communities/vendor_opc.git \
             vendor/opc
-
-          # 板级适配
           git clone -b ${{ inputs.branch }} --depth=1 \
-            https://gitee.com/ohos-porting-communities/device_board_opc.git \
+            https://gitcode.com/ohos-porting-communities/device_board_opc.git \
             device/board/opc
-
-          # SoC 适配
           git clone -b ${{ inputs.branch }} --depth=1 \
-            https://gitee.com/ohos-porting-communities/device_soc_opc.git \
+            https://gitcode.com/ohos-porting-communities/device_soc_opc.git \
             device/soc/opc
-
-          # 内核 (Orange Pi 5 Plus / Ultra)
           git clone -b ${{ inputs.branch }} --depth=1 \
-            https://gitee.com/ohos-porting-communities/linux_5.10_opi.git \
+            https://gitcode.com/ohos-porting-communities/linux_5.10_opi.git \
             kernel/linux/linux-5.10-opi
 
-          echo '=== Source tree ==='
+          echo '=== Done ==='
           ls -la
           du -sh .
-
-      - name: 🔍 源码验证
-        shell: bash
-        run: |
-          cd "${HOME}/openharmony"
-          echo "=== vendor/opc ==="
-          ls vendor/opc/ 2>/dev/null | head -10 || echo "MISSING vendor/opc"
-          echo "=== device/board/opc/${product_name} ==="
-          ls "device/board/opc/${{ inputs.product_name }}/" 2>/dev/null || echo "MISSING device/board/opc/${product_name}"
-          echo "=== build.sh ==="
-          test -x ./build.sh && echo "EXISTS" || echo "MISSING build.sh"
 
       - name: 📥 安装编译工具链 (prebuilts)
         shell: bash
@@ -145,22 +120,18 @@ jobs:
           cd "${HOME}/openharmony"
           if [ -f build/prebuilts_download.sh ]; then
             bash build/prebuilts_download.sh 2>&1
-          elif [ -f build/prebuilts_download.py ]; then
-            python3 build/prebuilts_download.py 2>&1
           else
-            echo "[SKIP] no prebuilts download script"
+            echo '[SKIP] no prebuilts_download.sh'
           fi
 
       - name: 💾 CCache 缓存
         uses: actions/cache@v4
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ohos-${{ inputs.product_name }}-ccache
-          restore-keys: |
-            ohos-${{ inputs.product_name }}-
-            ohos-
+          key: ohos-opi5plus-ccache
+          restore-keys: ohos-opi5plus-
 
-      - name: 🔨 编译 OpenHarmony
+      - name: 🔨 编译 OpenHarmony (Orange Pi 5 Plus)
         shell: bash
         run: |
           set -ex
@@ -171,28 +142,22 @@ jobs:
           export CCACHE_COMPRESSLEVEL=6
           export CCACHE_MAXSIZE=10G
 
-          # 打 x86 补丁
           echo '=== Apply x86 patches ==='
           if [ -d vendor/opc/x86_general/patches ]; then
-            cd vendor/opc/x86_general/patches
-            sh patch.sh 2>&1 || echo '[WARN] x86 patch failed (non-fatal)'
-            cd "${HOME}/openharmony"
+            (cd vendor/opc/x86_general/patches && sh patch.sh 2>&1) || echo '[WARN] patch failed'
           fi
 
-          echo '=== Building: ${{ inputs.product_name }} ==='
+          echo '=== Building: opi5plus ==='
           build_start=$(date +%s)
 
           ./build.sh \
-            --product-name "${{ inputs.product_name }}" \
+            --product-name opi5plus \
             --ccache \
             --jobs $(nproc --ignore=1) \
             2>&1 | tee build.log
 
-          build_exit=${PIPESTATUS[0]}
-          build_end=$(date +%s)
-
-          echo "BUILD_EXIT=${build_exit}" >> "${GITHUB_ENV}"
-          echo "BUILD_DURATION=$(( build_end - build_start ))s" >> "${GITHUB_ENV}"
+          echo "BUILD_EXIT=${PIPESTATUS[0]}" >> "${GITHUB_ENV}"
+          echo "BUILD_DURATION=$(( $(date +%s) - build_start ))s" >> "${GITHUB_ENV}"
 
       - name: 📊 收集构建产物
         if: always()
@@ -201,33 +166,24 @@ jobs:
           cd "${HOME}/openharmony"
           mkdir -p "${HOME}/artifacts"
 
-          OUT_DIR="out/${{ inputs.product_name }}"
-          IMG_DIR="${OUT_DIR}/packages/phone/images"
-
-          echo "=== Looking for images ==="
-          find "${OUT_DIR}" -name "*.img" -type f 2>/dev/null | head -20 || echo "No images in ${OUT_DIR}"
-
+          IMG_DIR="out/opi5plus/packages/phone/images"
           if [ -d "${IMG_DIR}" ]; then
-            echo "=== Copying from ${IMG_DIR} ==="
-            find "${IMG_DIR}" -name "*.img" -type f 2>/dev/null | while read f; do
-              echo "  Copying: ${f}"
-              cp "${f}" "${HOME}/artifacts/" 2>/dev/null || true
+            find "${IMG_DIR}" -name "*.img" -type f | while read f; do
+              echo "Copying: ${f}"
+              cp "${f}" "${HOME}/artifacts/"
             done
           fi
-
-          # fallback: search whole out/
-          find "out" -name "*.img" -type f 2>/dev/null | while read f; do
+          find out -name "*.img" -type f 2>/dev/null | while read f; do
             cp "${f}" "${HOME}/artifacts/" 2>/dev/null || true
           done
-
           test -f build.log && cp build.log "${HOME}/artifacts/"
-          ls -lh "${HOME}/artifacts/" || echo "(empty artifacts)"
+          ls -lh "${HOME}/artifacts/" || echo '(empty)'
 
       - name: 📤 上传构建产物
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: OpenHarmony-${{ inputs.product_name }}-${{ github.run_id }}
+          name: OpenHarmony-opi5plus-${{ github.run_id }}
           path: ${{ runner.temp }}/../artifacts/
           retention-days: 7
 
@@ -238,6 +194,7 @@ jobs:
           ## Build Summary
           - **Status**: ${{ env.BUILD_EXIT == '0' && '✅ Success' || '❌ Failed' }}
           - **Duration**: ${{ env.BUILD_DURATION }}
-          - **Product**: ${{ inputs.product_name }}
-          - **Branch**: ${{ inputs.branch }}
+          - **Product**: **opi5plus** (Orange Pi 5 Plus)
+          - **Manifest**: gitcode.com/openharmony
+          - **OPC**: gitcode.com/ohos-porting-communities
           EOF
