@@ -21,9 +21,7 @@ jobs:
         run: |
           pip install rkllm_toolkit-1.2.3-cp311-cp311-linux_x86_64.whl
 
-      - name: Download Phi-3-Mini from hf-mirror
-        env:
-          HF_ENDPOINT: "https://hf-mirror.com"
+      - name: Download Phi-3-Mini
         run: |
           hf download ${{ env.MODEL_NAME }} \
             --local-dir ./${{ env.MODEL_NAME }}
