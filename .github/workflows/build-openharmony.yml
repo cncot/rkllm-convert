@@ -1,4 +1,11 @@
-# Build OpenHarmony 5.0.3 for Orange Pi 5 Plus (RK3588)
+# Build OpenHarmony 5.1.0 for Orange Pi 5 Plus (opc vendor)
+#
+# 基于 OPC (OpenHarmony Porting Community) 适配方案:
+#   https://gitee.com/ohos-porting-communities/vendor_opc
+#   https://gitee.com/ohos-porting-communities/device_board_opc
+#   https://gitee.com/ohos-porting-communities/device_soc_opc
+#
+# 产物: out/{product}/packages/phone/images/
 name: Build OpenHarmony
 
 on:
@@ -10,12 +17,12 @@ on:
         default: 'ubuntu-22.04'
         type: choice
         options:
+          - ubuntu-20.04
           - ubuntu-22.04
-          - ubuntu-24.04
       product_name:
-        description: '编译产品名'
+        description: '产品名 (opi5plus/opi5ultra/f12/rpi4/beryllium/sagit)'
         required: true
-        default: 'rk3588'
+        default: 'opi5plus'
       branch:
         description: 'OpenHarmony 分支'
         required: true
@@ -23,6 +30,7 @@ on:
 
 env:
   CCACHE_DIR: /tmp/ccache
+  TAG: OpenHarmony-v5.1.0-Release
 
 concurrency:
   group: build-openharmony-${{ github.ref }}
@@ -46,21 +54,24 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
-            binutils binutils-dev \
-            build-essential bison flex \
-            python3 python3-pip python3-setuptools python3-wheel python3-paramiko \
-            ninja-build cmake ccache \
-            git curl wget unzip zip \
+            binutils git git-lfs gnupg flex bison gperf \
+            build-essential zip curl zlib1g-dev \
+            gcc-multilib g++-multilib libc6-dev-i386 \
+            lib32ncurses5-dev x11proto-core-dev libx11-dev \
+            lib32z1-dev ccache libgl1-mesa-dev libxml2-utils \
+            xsltproc unzip m4 bc gnutls-bin \
+            python3.8 python3-pip ruby default-jdk \
+            libssl-dev libtinfo5 genext2fs u-boot-tools \
+            mtools mtd-utils scons gcc-arm-none-eabi \
+            abootimg libelf-dev libxcursor-dev libxrandr-dev \
+            libxinerma-dev \
             mtools dosfstools \
-            libssl-dev libncurses5-dev liblz4-tool \
-            libffi-dev libelf-dev libudev-dev libpci-dev \
-            libgmp-dev libmpfr-dev libmpc-dev \
             file tree
-          sudo pip3 install --quiet setuptools wheel
+          sudo pip3 install --quiet setuptools wheel requests
 
-      - name: 🛠 安装 repo 工具
+      - name: 🛠 安装 Gitee repo 工具
         run: |
-          curl -sL https://storage.googleapis.com/git-repo-downloads/repo -o /tmp/repo
+          curl -s https://gitee.com/oschina/repo/raw/fork_flow/repo-py3 -o /tmp/repo
           chmod +x /tmp/repo
           sudo mv /tmp/repo /usr/local/bin/repo
           python3 /usr/local/bin/repo --version
@@ -70,74 +81,84 @@ jobs:
           git config --global user.name "Builder"
           git config --global user.email "builder@localhost"
 
-      - name: 📥 获取 OpenHarmony 源码
+      - name: 📥 获取 OpenHarmony 源码 + OPC 设备适配
         shell: bash
         run: |
           set -ex
+
           mkdir -p "${HOME}/openharmony"
           cd "${HOME}/openharmony"
 
-          echo '=== repo init ==='
+          # ── repo init + sync (MANIFEST from Gitee) ──
+          echo '=== repo init (Gitee manifest, tag based) ==='
           repo init \
-            -u https://gitcode.com/openharmony/manifest \
-            -b "${{ inputs.branch }}" \
-            # --repo-url: use default (Google) — GH runner has direct access
+            -u https://gitee.com/openharmony/manifest.git \
+            -b refs/tags/${{ env.TAG }} \
             --no-repo-verify 2>&1
 
-          echo '=== .repo manifest ==='
-          ls -la .repo/
-          if [ -f .repo/manifest.xml ]; then
-            echo '--- manifest.xml (first 50 lines) ---'
-            head -50 .repo/manifest.xml
-          fi
-          if [ -f .repo/manifests/default.xml ]; then
-            echo '--- default.xml (first 50 lines) ---'
-            head -50 .repo/manifests/default.xml
-          fi
-          # also check manifests.git
-          find .repo -name "*.xml" -type f 2>/dev/null | head -5
-
           echo '=== repo sync ==='
-          # sync with full output, 4 parallel jobs
-          repo sync -c -j4 --no-tags --no-clone-bundle -v 2>&1
-          sync_exit=$?
-          echo "repo sync exit: ${sync_exit}"
+          repo sync -c -j$(nproc --ignore=1) --no-tags --no-clone-bundle 2>&1
+          echo '=== git lfs pull ==='
+          repo forall -c 'git lfs pull' 2>&1 || echo '[SKIP] git lfs pull failed (not fatal)'
 
-          echo '=== working tree after sync ==='
+          # ── OPC 设备适配代码 ──
+          echo '=== Clone OPC vendor/device/kernel ==='
+
+          # 厂商适配层
+          git clone -b ${{ inputs.branch }} --depth=1 \
+            https://gitee.com/ohos-porting-communities/vendor_opc.git \
+            vendor/opc
+
+          # 板级适配
+          git clone -b ${{ inputs.branch }} --depth=1 \
+            https://gitee.com/ohos-porting-communities/device_board_opc.git \
+            device/board/opc
+
+          # SoC 适配
+          git clone -b ${{ inputs.branch }} --depth=1 \
+            https://gitee.com/ohos-porting-communities/device_soc_opc.git \
+            device/soc/opc
+
+          # 内核 (Orange Pi 5 Plus / Ultra)
+          git clone -b ${{ inputs.branch }} --depth=1 \
+            https://gitee.com/ohos-porting-communities/linux_5.10_opi.git \
+            kernel/linux/linux-5.10-opi
+
+          echo '=== Source tree ==='
           ls -la
-          echo '--- directories ---'
-          find . -maxdepth 2 -type d ! -path './.repo/*' 2>/dev/null | head -40 || echo '(empty)'
-          du -sh . 2>/dev/null || true
+          du -sh .
 
-      - name: 🔍 源码诊断
+      - name: 🔍 源码验证
         shell: bash
         run: |
           cd "${HOME}/openharmony"
-          echo "=== top level ==="
-          find . -maxdepth 1 ! -name '.repo' ! -name '.' | head -40
-          echo "=== build scripts ==="
-          find . -maxdepth 3 -name 'build.sh' -o -name 'build.py' -o -name '*.gni' 2>/dev/null | head -20
-          echo "=== device dir ==="
-          find . -maxdepth 3 -type d -name 'device' 2>/dev/null | head -5
-          echo "=== total size ==="
-          du -sh . 2>/dev/null || true
+          echo "=== vendor/opc ==="
+          ls vendor/opc/ 2>/dev/null | head -10 || echo "MISSING vendor/opc"
+          echo "=== device/board/opc/${product_name} ==="
+          ls "device/board/opc/${{ inputs.product_name }}/" 2>/dev/null || echo "MISSING device/board/opc/${product_name}"
+          echo "=== build.sh ==="
+          test -x ./build.sh && echo "EXISTS" || echo "MISSING build.sh"
 
-      - name: 📥 安装编译工具链
+      - name: 📥 安装编译工具链 (prebuilts)
         shell: bash
         run: |
-          cd "${HOME}/openharmony" || exit 0
-          test -f build/prebuilts_download.sh && bash build/prebuilts_download.sh 2>&1 || \
-          test -f build/prebuilts_download.py && python3 build/prebuilts_download.py 2>&1 || \
-          echo "[SKIP] no prebuilts download script found"
+          cd "${HOME}/openharmony"
+          if [ -f build/prebuilts_download.sh ]; then
+            bash build/prebuilts_download.sh 2>&1
+          elif [ -f build/prebuilts_download.py ]; then
+            python3 build/prebuilts_download.py 2>&1
+          else
+            echo "[SKIP] no prebuilts download script"
+          fi
 
       - name: 💾 CCache 缓存
         uses: actions/cache@v4
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ohos-ccache-${{ inputs.product_name }}-${{ hashFiles('build/**', 'kernel/**', 'device/**') }}
+          key: ohos-${{ inputs.product_name }}-ccache
           restore-keys: |
-            ohos-ccache-${{ inputs.product_name }}-
-            ohos-ccache-
+            ohos-${{ inputs.product_name }}-
+            ohos-
 
       - name: 🔨 编译 OpenHarmony
         shell: bash
@@ -150,28 +171,28 @@ jobs:
           export CCACHE_COMPRESSLEVEL=6
           export CCACHE_MAXSIZE=10G
 
-          build_start=$(date +%s)
-
-          SCRIPT=""
-          test -x ./build.sh && SCRIPT="./build.sh"
-          test -z "$SCRIPT" && test -x build/build.sh && SCRIPT="build/build.sh"
-          test -z "$SCRIPT" && test -f build.py && SCRIPT="python3 build.py"
-
-          if [ -n "$SCRIPT" ]; then
-            echo "Using: ${SCRIPT} --product-name ${{ inputs.product_name }}"
-            ${SCRIPT} \
-              --product-name "${{ inputs.product_name }}" \
-              --ccache \
-              --jobs $(nproc --ignore=1) \
-              2>&1 | tee build.log
-          else
-            echo "No build script found. Listing available scripts:"
-            find . -maxdepth 3 -type f \( -name 'build*' -o -name '*.sh' -o -name '*.py' \) 2>/dev/null | grep -v '.repo/' | head -30
-            exit 1
+          # 打 x86 补丁
+          echo '=== Apply x86 patches ==='
+          if [ -d vendor/opc/x86_general/patches ]; then
+            cd vendor/opc/x86_general/patches
+            sh patch.sh 2>&1 || echo '[WARN] x86 patch failed (non-fatal)'
+            cd "${HOME}/openharmony"
           fi
 
-          echo "BUILD_EXIT=${PIPESTATUS[0]}" >> "${GITHUB_ENV}"
-          echo "BUILD_DURATION=$(( $(date +%s) - build_start ))s" >> "${GITHUB_ENV}"
+          echo '=== Building: ${{ inputs.product_name }} ==='
+          build_start=$(date +%s)
+
+          ./build.sh \
+            --product-name "${{ inputs.product_name }}" \
+            --ccache \
+            --jobs $(nproc --ignore=1) \
+            2>&1 | tee build.log
+
+          build_exit=${PIPESTATUS[0]}
+          build_end=$(date +%s)
+
+          echo "BUILD_EXIT=${build_exit}" >> "${GITHUB_ENV}"
+          echo "BUILD_DURATION=$(( build_end - build_start ))s" >> "${GITHUB_ENV}"
 
       - name: 📊 收集构建产物
         if: always()
@@ -179,12 +200,28 @@ jobs:
         run: |
           cd "${HOME}/openharmony"
           mkdir -p "${HOME}/artifacts"
-          find . -name "*.img" -type f 2>/dev/null | head -20
-          find . -name "*.img" -type f 2>/dev/null | while read f; do
-            cp "$f" "${HOME}/artifacts/" 2>/dev/null || true
+
+          OUT_DIR="out/${{ inputs.product_name }}"
+          IMG_DIR="${OUT_DIR}/packages/phone/images"
+
+          echo "=== Looking for images ==="
+          find "${OUT_DIR}" -name "*.img" -type f 2>/dev/null | head -20 || echo "No images in ${OUT_DIR}"
+
+          if [ -d "${IMG_DIR}" ]; then
+            echo "=== Copying from ${IMG_DIR} ==="
+            find "${IMG_DIR}" -name "*.img" -type f 2>/dev/null | while read f; do
+              echo "  Copying: ${f}"
+              cp "${f}" "${HOME}/artifacts/" 2>/dev/null || true
+            done
+          fi
+
+          # fallback: search whole out/
+          find "out" -name "*.img" -type f 2>/dev/null | while read f; do
+            cp "${f}" "${HOME}/artifacts/" 2>/dev/null || true
           done
+
           test -f build.log && cp build.log "${HOME}/artifacts/"
-          ls -lh "${HOME}/artifacts/" || echo "(empty)"
+          ls -lh "${HOME}/artifacts/" || echo "(empty artifacts)"
 
       - name: 📤 上传构建产物
         if: always()
