@@ -79,7 +79,7 @@ jobs:
 
           echo '=== repo init ==='
           repo init \
-            -u https://gitee.com/openharmony/manifest \
+            -u https://gitcode.com/openharmony/manifest \
             -b "${{ inputs.branch }}" \
             --repo-url=https://mirrors.tuna.tsinghua.edu.cn/git/git-repo \
             --no-repo-verify 2>&1
