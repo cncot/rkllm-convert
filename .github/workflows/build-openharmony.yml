@@ -19,7 +19,7 @@ on:
       branch:
         description: 'OpenHarmony 分支'
         required: true
-        default: 'OpenHarmony-5.0.3-Release'
+        default: 'OpenHarmony-5.1.0-Release'
 
 env:
   CCACHE_DIR: /tmp/ccache
@@ -60,7 +60,7 @@ jobs:
 
       - name: 🛠 安装 repo 工具
         run: |
-          curl -sL https://mirrors.tuna.tsinghua.edu.cn/git/git-repo/repo -o /tmp/repo
+          curl -sL https://storage.googleapis.com/git-repo-downloads/repo -o /tmp/repo
           chmod +x /tmp/repo
           sudo mv /tmp/repo /usr/local/bin/repo
           python3 /usr/local/bin/repo --version
@@ -81,7 +81,7 @@ jobs:
           repo init \
             -u https://gitcode.com/openharmony/manifest \
             -b "${{ inputs.branch }}" \
-            --repo-url=https://mirrors.tuna.tsinghua.edu.cn/git/git-repo \
+            # --repo-url: use default (Google) — GH runner has direct access
             --no-repo-verify 2>&1
 
           echo '=== .repo manifest ==='
