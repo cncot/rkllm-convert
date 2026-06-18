@@ -14,7 +14,7 @@ max_retries = 3
 for attempt in range(1, max_retries + 1):
     print(f"Downloading {repo_id} to {local_dir}... (attempt {attempt}/{max_retries})")
     try:
-        model_dir = snapshot_download(repo_id, local_dir=local_dir, resume_download=True)
+        model_dir = snapshot_download(repo_id, local_dir=local_dir)
         print(f"Downloaded to: {model_dir}")
         with open(os.environ["GITHUB_ENV"], "a") as f:
             f.write(f"MODEL_PATH={model_dir}\n")
