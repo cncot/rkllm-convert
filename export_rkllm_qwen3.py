@@ -2,10 +2,9 @@
 Convert Qwen3-4B-Instruct-2507 to RKLLM format for RK3588 NPU.
 
 Usage:
-    MODEL_PATH=./Qwen-Qwen3-4B-Instruct-2507 MAX_CONTEXT=16384 python3 export_rkllm_qwen3.py
+    MODEL_PATH=./Qwen-Qwen3-4B-Instruct-2507 MAX_CONTEXT=32768 python3 export_rkllm_qwen3.py
 
-NOTE: RKLLM toolkit v1.2.3 limits max_context to [32, 16384].
-      For larger context, upgrade to rkllm_toolkit >= v1.4.
+NOTE: Use RKLLM toolkit v1.2.2 (before v1.2.3 introduced the 16K hard cap).
 """
 from rkllm.api import RKLLM
 import os
@@ -15,18 +14,9 @@ if not modelpath:
     print('MODEL_PATH environment variable is required')
     exit(1)
 
-max_context_raw = int(os.environ.get('MAX_CONTEXT', '16384'))
-
-# RKLLM v1.2.3 hard limit: max_context ∈ [32, 16384]
-MAX_ALLOWED = 16384
-if max_context_raw > MAX_ALLOWED:
-    print(f'WARNING: max_context={max_context_raw} exceeds toolkit limit of {MAX_ALLOWED}')
-    print(f'  Capping to {MAX_ALLOWED}. Upgrade rkllm_toolkit for larger context.')
-    max_context = MAX_ALLOWED
-elif max_context_raw < 32:
+max_context = int(os.environ.get('MAX_CONTEXT', '32768'))
+if max_context < 32:
     max_context = 32
-else:
-    max_context = max_context_raw
 
 print(f'Loading model from: {modelpath}')
 print(f'Max context: {max_context}')
@@ -70,7 +60,7 @@ if ret != 0:
     print(output)
     exit(ret)
 
-# Match user's naming convention: Qwen3-4B-Instruct-2507-rk3588-w8a8_g128-opt-1-hybrid-ratio-0.0-16k.rkllm
+# Output filename reflects context size
 out_name = (
     f"Qwen3-4B-Instruct-2507-rk3588-{quantized_dtype.lower()}_g128"
     f"-opt-{optimization_level}-hybrid-ratio-0.0-{max_context // 1024}k.rkllm"
