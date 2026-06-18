@@ -48,17 +48,18 @@ jobs:
 
       - name: Download model from ModelScope
         run: |
-          python3 -c "
+          cat > /tmp/download_model.py << 'PYEOF'
 from modelscope.hub.snapshot_download import snapshot_download
 import os
 repo_id = os.environ['REPO_ID']
-local_dir = f'./{repo_id.replace(\"/\", \"-\")}'
-print(f'Downloading {repo_id} to {local_dir}...')
+local_dir = f'./{repo_id.replace("/", "-")}'
+print(f"Downloading {repo_id} to {local_dir}...")
 model_dir = snapshot_download(repo_id, local_dir=local_dir, resume_download=True)
-print(f'Downloaded to: {model_dir}')
-with open(os.environ['GITHUB_ENV'], 'a') as f:
-    f.write(f'MODEL_PATH={model_dir}\n')
-"
+print(f"Downloaded to: {model_dir}")
+with open(os.environ["GITHUB_ENV"], "a") as f:
+    f.write(f"MODEL_PATH={model_dir}\n")
+PYEOF
+          python3 /tmp/download_model.py
 
       - name: Verify model files
         run: |
