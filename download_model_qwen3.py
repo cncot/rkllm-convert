@@ -1,11 +1,11 @@
 """
-Download Qwen3-4B-Instruct-2507 from ModelScope (HF mirror in China).
-Saves to local directory and writes MODEL_PATH to GITHUB_ENV.
+Download Qwen3-4B-Instruct-2507 from HuggingFace.
+GH runners are in Azure US, HF is much faster than cross-border ModelScope.
 Retries up to 3 times on failure.
 """
 import os
 import time
-from modelscope.hub.snapshot_download import snapshot_download
+from huggingface_hub import snapshot_download
 
 repo_id = os.environ['REPO_ID']
 local_dir = f'./{repo_id.replace("/", "-")}'
