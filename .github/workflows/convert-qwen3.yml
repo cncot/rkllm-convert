@@ -1,4 +1,4 @@
-name: Convert Qwen3-4B-Instruct-2507 to RKLLM (W8A8)
+name: Convert Qwen3-4B-Instruct-2507 to RKLLM (W8A8) [32K]
 
 on:
   workflow_dispatch:
@@ -17,7 +17,6 @@ on:
 env:
   REPO_ID: "Qwen/Qwen3-4B-Instruct-2507"
   DEFAULT_CONTEXT: "32768"
-  RKLLM_WHL_URL: "https://github.com/airockchip/rknn-llm/raw/release-v1.2.2/rkllm-toolkit/packages/rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64.whl"
 
 jobs:
   convert:
@@ -29,10 +28,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install RKLLM-Toolkit v1.2.2
-        run: |
-          wget -q "$RKLLM_WHL_URL" -O rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64.whl
-          pip install rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64.whl
+      - name: Install patched RKLLM-Toolkit v1.2.2 (32K support)
+        run: pip install rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl
 
       - name: Install dependencies
         run: pip install huggingface_hub accelerate
