@@ -6,7 +6,7 @@ on:
       max_context:
         description: 'Max context limit in tokens'
         required: true
-        default: '32768'
+        default: '16384'
         type: choice
         options:
           - '16384'
@@ -15,7 +15,7 @@ on:
 
 env:
   REPO_ID: "Qwen/Qwen3-4B-Instruct-2507"
-  DEFAULT_CONTEXT: "32768"
+  DEFAULT_CONTEXT: "16384"
 
 jobs:
   convert:
