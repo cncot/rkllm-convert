@@ -6,17 +6,18 @@ on:
       max_context:
         description: 'Max context limit in tokens'
         required: true
-        default: '16384'
+        default: '32768'
         type: choice
         options:
           - '4096'
           - '8192'
           - '16384'
+          - '32768'
 
 env:
   REPO_ID: "Qwen/Qwen3-4B-Instruct-2507"
-  DEFAULT_CONTEXT: "16384"
-  MAX_CONTEXT_ALLOWED: "16384" # v1.2.3 limit, use 16K max
+  DEFAULT_CONTEXT: "32768"
+  RKLLM_WHL_URL: "https://github.com/airockchip/rknn-llm/raw/release-v1.2.2/rkllm-toolkit/packages/rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64.whl"
 
 jobs:
   convert:
@@ -28,8 +29,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install RKLLM-Toolkit
-        run: pip install rkllm_toolkit-1.2.3-cp311-cp311-linux_x86_64.whl
+      - name: Install RKLLM-Toolkit v1.2.2
+        run: |
+          wget -q "$RKLLM_WHL_URL" -O rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64.whl
+          pip install rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64.whl
 
       - name: Install dependencies
         run: pip install huggingface_hub accelerate
@@ -54,7 +57,7 @@ jobs:
           free -h
           df -h / /home/runner
 
-      - name: Download model from ModelScope (with retry)
+      - name: Download model from HuggingFace (with retry)
         run: python3 download_model_qwen3.py
 
       - name: Verify model files
