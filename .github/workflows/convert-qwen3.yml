@@ -9,13 +9,14 @@ on:
         default: '16384'
         type: choice
         options:
+          - '4096'
+          - '8192'
           - '16384'
-          - '32768'
-          - '65536'
 
 env:
   REPO_ID: "Qwen/Qwen3-4B-Instruct-2507"
   DEFAULT_CONTEXT: "16384"
+  MAX_CONTEXT_ALLOWED: "16384" # v1.2.3 limit, use 16K max
 
 jobs:
   convert:
