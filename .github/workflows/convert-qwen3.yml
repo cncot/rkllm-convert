@@ -31,7 +31,7 @@ jobs:
         run: pip install rkllm_toolkit-1.2.3-cp311-cp311-linux_x86_64.whl
 
       - name: Install dependencies
-        run: pip install modelscope huggingface_hub accelerate
+        run: pip install huggingface_hub accelerate
 
       - name: Check baseline resources
         run: |
