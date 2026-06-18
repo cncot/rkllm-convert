@@ -29,7 +29,10 @@ jobs:
           python-version: "3.11"
 
       - name: Install patched RKLLM-Toolkit v1.2.2 (32K support)
-        run: pip install rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl
+        run: |
+          # Rename to valid wheel filename before install
+          mv rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64.whl
+          pip install rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64.whl
 
       - name: Install dependencies
         run: pip install huggingface_hub accelerate
