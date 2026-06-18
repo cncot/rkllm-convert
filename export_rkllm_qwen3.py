@@ -3,7 +3,7 @@ Convert Qwen3-4B-Instruct-2507 to RKLLM format for RK3588 NPU.
 Download from ModelScope (HF mirror accessible in China).
 
 Usage:
-    MODEL_PATH=./Qwen3-4B-Instruct-2507 MAX_CONTEXT=32768 python3 export_rkllm_qwen3.py
+    MODEL_PATH=./Qwen3-4B-Instruct-2507 MAX_CONTEXT=16384 python3 export_rkllm_qwen3.py
 """
 from rkllm.api import RKLLM
 import os
@@ -13,7 +13,13 @@ if not modelpath:
     print('MODEL_PATH environment variable is required')
     exit(1)
 
-max_context = int(os.environ.get('MAX_CONTEXT', '32768'))
+max_context = int(os.environ.get('MAX_CONTEXT', '16384'))
+
+# RKLLM toolkit 1.2.3 limit: max_context must be within [32, 16384]
+MAX_CTX_LIMIT = 16384
+if max_context > MAX_CTX_LIMIT:
+    print(f'WARNING: max_context={max_context} exceeds RKLLM limit of {MAX_CTX_LIMIT}, capping to {MAX_CTX_LIMIT}')
+    max_context = MAX_CTX_LIMIT
 
 print(f'Loading model from: {modelpath}')
 print(f'Max context: {max_context}')
