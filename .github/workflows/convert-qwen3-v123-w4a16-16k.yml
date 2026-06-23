@@ -1,0 +1,86 @@
+# =====================================================================
+# W4A16 (INT4) 16K 上下文 — 推荐版
+# 更小的 KV cache = 更快推理 + 更低 IOVA 压力
+# 输出: ~2.2GB, 12-18 t/s
+# =====================================================================
+name: Convert Qwen3-4B-2507 to RKLLM (W4A16/INT4) [16K] [v1.2.3]
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_context:
+        description: 'Max context limit in tokens'
+        required: true
+        default: '16384'
+        type: choice
+        options:
+          - '4096'
+          - '8192'
+          - '16384'
+
+env:
+  REPO_ID: "Qwen/Qwen3-4B-Instruct-2507"
+  DEFAULT_CONTEXT: "16384"
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install patched RKLLM-Toolkit v1.2.3 (32K support)
+        run: pip install rkllm_toolkit-1.2.3-cp311-cp311-linux_x86_64.whl
+
+      - name: Install dependencies
+        run: pip install huggingface_hub accelerate
+
+      - name: Check baseline resources
+        run: |
+          echo "=== Memory ==="
+          free -h
+          echo "=== Disk ==="
+          df -h / /home/runner
+
+      - name: Add swap for model loading (24GB)
+        run: |
+          sudo swapoff /swapfile 2>/dev/null || true
+          sudo rm -f /swapfile
+          echo "Creating 24GB swap file..."
+          sudo fallocate -l 24G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=24576 status=none
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          echo "=== After swap ==="
+          free -h
+          df -h / /home/runner
+
+      - name: Download model from HuggingFace (with retry)
+        run: python3 download_model_qwen3.py
+
+      - name: Verify model files
+        run: |
+          ls -lh $MODEL_PATH/
+          echo "---"
+          du -sh $MODEL_PATH/
+          echo "---"
+          ls $MODEL_PATH/*.safetensors 2>/dev/null | wc -l
+
+      - name: Convert to RKLLM (W4A16 / INT4 / 16K)
+        env:
+          MAX_CONTEXT: ${{ github.event.inputs.max_context || env.DEFAULT_CONTEXT }}
+        run: python3 export_rkllm_qwen3_w4a16_16k.py
+
+      - name: Show output
+        run: ls -lh *.rkllm
+
+      - name: Upload RKLLM model artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Qwen3-4B-2507_W4A16_RK3588_v123_16K
+          path: ./*.rkllm
+          compression-level: 0
+          retention-days: 30
