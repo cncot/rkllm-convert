@@ -44,7 +44,7 @@ optimization_level = 1
 
 # ---- 尝试 W4A16 ----
 # RKLLM v1.2.3 on RK3588 可能不支持 W4A16，这里依次尝试多种方式
-quantized_dtype = "W4A16"
+quantized_dtype = "w4a16_g32"
 target_platform = "RK3588"
 
 print(f'Starting quantization: max_context={max_context}, dtype={quantized_dtype}...')
@@ -104,26 +104,13 @@ if ret != 0:
     if ret != 0:
         print(f'Attempt 3 failed: ret={ret}')
         sys.stdout.flush()
-            do_quantization=True,
-            optimization_level=optimization_level,
-            quantized_dtype=quantized_dtype,
-            quantized_algorithm="normal",
-            target_platform=target_platform,
-            num_npu_core=num_npu_core,
-            dataset=dataset,
-            hybrid_rate=0,
-            max_context=max_context
-        )
-    except Exception as e:
-        print(f'Attempt 3 failed: {e}')
-        sys.stdout.flush()
 
 if ret != 0:
     print(f'All build attempts failed! ret={ret}')
     sys.exit(ret)
 
 out_name = (
-    f"Qwen3-4B-Instruct-2507-rk3588-{quantized_dtype.lower()}_g128"
+    f"Qwen3-4B-Instruct-2507-rk3588-{quantized_dtype.lower()}"
     f"-opt-{optimization_level}-hybrid-ratio-0.0-{max_context // 1024}k.rkllm"
 )
 ret = llm.export_rkllm(f"./{out_name}")
