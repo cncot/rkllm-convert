@@ -1,10 +1,7 @@
 """
 Convert Qwen3-4B-Instruct-2507 to RKLLM for RK3588 NPU — W4A16 16K (INT4).
 16K context = smaller KV cache = faster inference, lower IOVA pressure.
-
-Differences from export_rkllm_qwen3_w4a16.py:
-  max_context limited to 16384  (was dynamic up to 32768)
-  ~2.2GB model, 12-18 t/s      (was ~2.4GB, 10-15 t/s)
+Falls back to W8A8 if W4A16 not supported by RKLLM v1.2.3.
 """
 from rkllm.api import RKLLM
 import os, sys
@@ -15,7 +12,6 @@ if not modelpath:
     sys.exit(1)
 
 max_context = int(os.environ.get('MAX_CONTEXT', '16384'))
-# 强制上限 16384 — 16K 专用脚本
 if max_context > 16384:
     print(f'Clamping max_context from {max_context} to 16384 (16K target)')
     max_context = 16384
@@ -44,43 +40,63 @@ print('Model loaded successfully')
 sys.stdout.flush()
 
 dataset = "./data_quant.json"
-target_platform = "RK3588"
-quantized_dtype = "W4A16"
-quantized_algorithm = "normal"
 num_npu_core = 3
 optimization_level = 1
 
+# ---- 尝试 W4A16 ----
+quantized_dtype = "W4A16"
+target_platform = "RK3588"
+
 print(f'Starting quantization: max_context={max_context}, dtype={quantized_dtype}...')
+print(f'Attempt 1: with target_platform={target_platform}')
 sys.stdout.flush()
 
-try:
+ret = llm.build(
+    do_quantization=True,
+    optimization_level=optimization_level,
+    quantized_dtype=quantized_dtype,
+    quantized_algorithm="normal",
+    target_platform=target_platform,
+    num_npu_core=num_npu_core,
+    dataset=dataset,
+    hybrid_rate=0,
+    max_context=max_context
+)
+
+# Attempt 2: without target_platform
+if ret != 0:
+    print(f'Attempt 1 failed: ret={ret}. Trying W4A16 without target_platform...')
+    sys.stdout.flush()
     ret = llm.build(
         do_quantization=True,
         optimization_level=optimization_level,
         quantized_dtype=quantized_dtype,
-        quantized_algorithm=quantized_algorithm,
+        quantized_algorithm="normal",
+        num_npu_core=num_npu_core,
+        dataset=dataset,
+        hybrid_rate=0,
+        max_context=max_context
+    )
+
+# Attempt 3: W8A8 fallback
+if ret != 0:
+    print(f'W4A16 not supported, falling back to W8A8...')
+    sys.stdout.flush()
+    quantized_dtype = "W8A8"
+    ret = llm.build(
+        do_quantization=True,
+        optimization_level=optimization_level,
+        quantized_dtype=quantized_dtype,
+        quantized_algorithm="normal",
         target_platform=target_platform,
         num_npu_core=num_npu_core,
         dataset=dataset,
         hybrid_rate=0,
         max_context=max_context
     )
-except Exception as e:
-    print(f'Build raised exception: {e}')
-    try:
-        log = llm.get_log()
-        print(f'LLM log: {log}')
-    except:
-        pass
-    sys.exit(1)
 
 if ret != 0:
-    print(f'Build model failed! ret={ret}')
-    try:
-        output = llm.get_log()
-        print(f'LLM log:\n{output}')
-    except Exception as e:
-        print(f'Could not get log: {e}')
+    print(f'All build attempts failed! ret={ret}')
     sys.exit(ret)
 
 out_name = (
