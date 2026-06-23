@@ -44,7 +44,7 @@ num_npu_core = 3
 optimization_level = 1
 
 # ---- 尝试 W4A16 ----
-quantized_dtype = "W4A16"
+quantized_dtype = "w4a16_g32"
 target_platform = "RK3588"
 
 print(f'Starting quantization: max_context={max_context}, dtype={quantized_dtype}...')
@@ -100,7 +100,7 @@ if ret != 0:
     sys.exit(ret)
 
 out_name = (
-    f"Qwen3-4B-Instruct-2507-rk3588-{quantized_dtype.lower()}_g128"
+    f"Qwen3-4B-Instruct-2507-rk3588-{quantized_dtype.lower()}"
     f"-opt-{optimization_level}-hybrid-ratio-0.0-{max_context // 1024}k.rkllm"
 )
 ret = llm.export_rkllm(f"./{out_name}")
