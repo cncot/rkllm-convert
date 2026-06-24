@@ -1,0 +1,68 @@
+# =====================================================================
+# Qwen3-4B → RKLLM W8A8 16K (v1.3.0 baseline)
+# Fast path — no W4A16 attempts, pure W8A8 for comparison
+# =====================================================================
+name: Qwen3-4B RKLLM v1.3.0 W8A8 [16K]
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_context:
+        description: 'Max context limit in tokens'
+        required: true
+        default: '16384'
+        type: choice
+        options:
+          - '4096'
+          - '8192'
+          - '16384'
+
+env:
+  REPO_ID: "Qwen/Qwen3-4B-Instruct-2507"
+  DEFAULT_CONTEXT: "16384"
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install RKLLM-Toolkit v1.3.0
+        run: |
+          wget -q "https://github.com/airockchip/rknn-llm/raw/release-v1.3.0/rkllm-toolkit/packages/rkllm_toolkit-1.3.0-cp311-cp311-linux_x86_64.whl"
+          pip install rkllm_toolkit-1.3.0-cp311-cp311-linux_x86_64.whl
+
+      - name: Install dependencies
+        run: pip install huggingface_hub accelerate
+
+      - name: Add swap for model loading (24GB)
+        run: |
+          sudo swapoff /swapfile 2>/dev/null || true
+          sudo rm -f /swapfile
+          sudo fallocate -l 24G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=24576 status=none
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+
+      - name: Download model from HuggingFace (with retry)
+        run: python3 download_model_qwen3.py
+
+      - name: Convert to RKLLM (W8A8 / 16K)
+        env:
+          MAX_CONTEXT: ${{ github.event.inputs.max_context || env.DEFAULT_CONTEXT }}
+        run: python3 export_rkllm_qwen3_w8a8_16k.py
+
+      - name: Show output
+        run: ls -lh *.rkllm
+
+      - name: Upload RKLLM model artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Qwen3-4B-RK3588-v130-W8A8-16K
+          path: ./*.rkllm
+          compression-level: 0
+          retention-days: 30
