@@ -1,0 +1,74 @@
+name: Convert Qwen3-4B-thinking-2507 (v1.2.2, W8A8_G128, 16K)
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_context:
+        description: 'Max context limit'
+        required: true
+        default: '16384'
+        type: choice
+        options:
+          - '4096'
+          - '8192'
+          - '16384'
+
+env:
+  REPO_ID: "Qwen/Qwen3-4B-Instruct-2507"
+  DEFAULT_CONTEXT: "16384"
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install patched RKLLM-Toolkit v1.2.2 (16K)
+        run: |
+          mv rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64.whl
+          pip install rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64.whl
+
+      - name: Install dependencies
+        run: pip install huggingface_hub accelerate
+
+      - name: Add swap (24GB)
+        run: |
+          sudo swapoff /swapfile 2>/dev/null || true
+          sudo rm -f /swapfile
+          sudo fallocate -l 24G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=24576 status=none
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
+      - name: Download model from HuggingFace
+        run: python3 download_model_qwen3.py
+
+      - name: Convert to RKLLM (W8A8, 16K)
+        env:
+          MAX_CONTEXT: ${{ github.event.inputs.max_context || env.DEFAULT_CONTEXT }}
+        run: |
+          python3 export_rkllm_qwen3.py
+          ls -lh *.rkllm
+
+      - name: Rename to desired output
+        run: |
+          mv -v Qwen3-4B-Instruct-2507-rk3588-w8a8_g128-opt-1-hybrid-ratio-0.0-16k.rkllm \
+                Qwen3-4B-thinking-2507-rk3588-w8a8_g128-16k.rkllm 2>/dev/null || \
+          for f in *.rkllm; do
+            mv -v "$f" "Qwen3-4B-thinking-2507-rk3588-w8a8_g128-16k.rkllm"
+            break
+          done
+          ls -lh *.rkllm
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Qwen3-4B-thinking-2507-w8a8_g128-16k
+          path: ./*.rkllm
+          compression-level: 0
+          retention-days: 30
