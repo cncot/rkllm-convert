@@ -65,15 +65,27 @@ jobs:
       - name: Convert to RKLLM (W8A8, 16K)
         env:
           MAX_CONTEXT: ${{ github.event.inputs.max_context || env.DEFAULT_CONTEXT }}
-        run: python3 export_rkllm_qwen3_vl.py
+        run: |
+          echo "MAX_CONTEXT=$MAX_CONTEXT" >> $GITHUB_ENV
+          python3 export_rkllm_qwen3_vl.py
 
       - name: Rename to short output name
         run: |
-          ls -lh *.rkllm
-          for f in *.rkllm; do
-            mv -v "$f" "Qwen3-VL-4B-Instruct-rk3588-w8a8_g128-${MAX_CONTEXT:-16}k.rkllm"
-            break
-          done
+          shopt -s nullglob
+          files=( *.rkllm )
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "WARNING: No .rkllm files found - listing workspace:"
+            ls -la
+            exit 0
+          fi
+          echo "Found: ${files[@]}"
+          ctx_k=$(( ${MAX_CONTEXT:-16384} / 1024 ))
+          target="Qwen3-VL-4B-Instruct-rk3588-w8a8_g128-${ctx_k}k.rkllm"
+          if [[ "${files[0]}" != "$target" ]]; then
+            mv -v "${files[0]}" "$target"
+          else
+            echo "Already named correctly: ${files[0]}"
+          fi
           ls -lh *.rkllm
 
       - name: Upload RKLLM model artifact
