@@ -1,34 +1,72 @@
-name: Convert DeepSeek-R1-Distill-Qwen-1.5B to RKLLM
+name: Convert DeepSeek-R1-Distill-Qwen-1.5B to RKLLM (v1.2.2)
 
-on: [workflow_dispatch]
+on:
+  workflow_dispatch:
+    inputs:
+      max_context:
+        description: 'Max context limit'
+        required: true
+        default: '8192'
+        type: choice
+        options:
+          - '4096'
+          - '8192'
+          - '16384'
 
 env:
   MODEL_NAME: "DeepSeek-R1-Distill-Qwen-1.5B"
+  DEFAULT_CONTEXT: "8192"
 
 jobs:
   convert:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install RKLLM-Toolkit
-        run: pip install rkllm_toolkit-1.2.3-cp311-cp311-linux_x86_64.whl
-
-      - name: Download model
+      - name: Install patched RKLLM-Toolkit v1.2.2
         run: |
-          python3 -c "from huggingface_hub import snapshot_download; import os; snapshot_download(repo_id='deepseek-ai/'+os.environ['MODEL_NAME'], local_dir='./'+os.environ['MODEL_NAME'], resume_download=True)"
+          mv rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64.whl
+          pip install rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64.whl
 
-      - name: Convert
+      - name: Install dependencies
+        run: pip install huggingface_hub accelerate
+
+      - name: Add swap (24GB)
+        run: |
+          sudo swapoff /swapfile 2>/dev/null || true
+          sudo rm -f /swapfile
+          sudo fallocate -l 24G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=24576 status=none
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
+      - name: Download model from HuggingFace
+        run: |
+          python3 -c "
+from huggingface_hub import snapshot_download
+import os
+model = os.environ['MODEL_NAME']
+snapshot_download(repo_id='deepseek-ai/'+model, local_dir='./'+model, resume_download=True)
+"
+          ls -lh $MODEL_NAME/
+
+      - name: Convert to RKLLM (W8A8, 16K)
         env:
           MODEL_PATH: ./${{ env.MODEL_NAME }}
-        run: python export_rkllm.py
+          MAX_CONTEXT: ${{ github.event.inputs.max_context || env.DEFAULT_CONTEXT }}
+        run: |
+          python export_rkllm.py
+          ls -lh *.rkllm
 
-      - name: Upload
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.MODEL_NAME }}_RK3588
+          name: ${{ env.MODEL_NAME }}_RK3588_v122
           path: ./*.rkllm
           compression-level: 0
+          retention-days: 30

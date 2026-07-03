@@ -19,6 +19,7 @@ target_platform = "RK3588"
 quantized_dtype = "W8A8"
 quantized_algorithm = "normal"
 num_npu_core = 3
+max_context = int(os.environ.get('MAX_CONTEXT', '4096'))
 
 ret = llm.build(do_quantization=True, optimization_level=1,
                 quantized_dtype=quantized_dtype,
@@ -26,7 +27,7 @@ ret = llm.build(do_quantization=True, optimization_level=1,
                 target_platform=target_platform,
                 num_npu_core=num_npu_core,
                 dataset=dataset,
-                hybrid_rate=0, max_context=4096)
+                hybrid_rate=0, max_context=max_context)
 if ret != 0:
     print('Build model failed!')
     exit(ret)
