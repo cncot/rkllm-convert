@@ -16,7 +16,6 @@ on:
 env:
   REPO_ID: "Qwen/Qwen3-1.7B-Instruct-2507"
   DEFAULT_CONTEXT: "16384"
-  ENABLE_THINKING: "true"
 
 jobs:
   convert:
@@ -30,16 +29,8 @@ jobs:
 
       - name: Install patched RKLLM-Toolkit v1.2.2 (16K)
         run: |
-          WHL="rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl"
-          if [ -f "$WHL" ]; then
-            echo "Found local whl"
-          else
-            echo "Downloading whl..."
-            pip install requests
-            python3 download_whl.py
-          fi
-          pip install "$WHL"
-          echo "RKLLM-Toolkit installed"
+          mv rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64.whl
+          pip install rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64.whl
 
       - name: Install dependencies
         run: pip install huggingface_hub accelerate
@@ -55,24 +46,29 @@ jobs:
           free -h
 
       - name: Download model from HuggingFace
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: python3 download_model_qwen3_1.7B.py
 
-      - name: Convert to RKLLM (W8A8, 16K, enable_thinking=True)
+      - name: Convert to RKLLM (W8A8, 16K)
         env:
           MAX_CONTEXT: ${{ github.event.inputs.max_context || env.DEFAULT_CONTEXT }}
         run: |
           python3 export_rkllm_qwen3_1.7B.py
           ls -lh *.rkllm
-          cat export_summary.json
+
+      - name: Rename to desired output
+        run: |
+          mv -v Qwen3-1.7B-Instruct-2507-rk3588-w8a8_g128-opt-1-hybrid-ratio-0.0-16k.rkllm \
+                Qwen3-1.7B-thinking-2507-rk3588-w8a8_g128-16k.rkllm 2>/dev/null || \
+          for f in *.rkllm; do
+            mv -v "$f" "Qwen3-1.7B-thinking-2507-rk3588-w8a8_g128-16k.rkllm"
+            break
+          done
+          ls -lh *.rkllm
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Qwen3-1.7B-thinking-w8a8_g128-16k
-          path: |
-            *.rkllm
-            export_summary.json
+          name: Qwen3-1.7B-thinking-2507-w8a8_g128-16k
+          path: ./*.rkllm
           compression-level: 0
           retention-days: 30
