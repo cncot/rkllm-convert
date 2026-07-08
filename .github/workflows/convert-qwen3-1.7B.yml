@@ -46,12 +46,25 @@ jobs:
           free -h
 
       - name: Download model from HuggingFace
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           python3 -c "
-          from huggingface_hub import snapshot_download
+          from huggingface_hub import snapshot_download, login
           import os
           model = os.environ['MODEL_NAME']
-          snapshot_download(repo_id='Qwen/'+model, local_dir='./'+model, resume_download=True)
+          hf_token = os.environ.get('HF_TOKEN', '')
+          if hf_token:
+              login(token=hf_token, add_to_git_credential=False)
+              print('Logged in with HF_TOKEN')
+          else:
+              print('No HF_TOKEN, trying anonymous download...')
+          snapshot_download(
+              repo_id='Qwen/'+model,
+              local_dir='./'+model,
+              resume_download=True,
+              ignore_patterns=['*.safetensors.index.json']
+          )
           "
           ls -lh $MODEL_NAME/
 
