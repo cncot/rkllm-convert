@@ -139,7 +139,7 @@ print(ls_out)
 # ── Step 5: Write summary ──
 summary = {
     "model": out_name,
-    "base_model": "Qwen/Qwen3-1.7B-Instruct-2507",
+    "base_model": "Qwen/Qwen3-1.7B",
     "dtype": quantized_dtype.lower(),
     "toolkit": "v1.2.2",
     "max_context": max_context,
