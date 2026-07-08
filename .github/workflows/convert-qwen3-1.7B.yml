@@ -29,72 +29,17 @@ jobs:
           python-version: "3.11"
 
       - name: Install patched RKLLM-Toolkit v1.2.2 (16K)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Strategy 1: whl already committed in repo
-          if [ -f rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl ]; then
-            echo "✅ Found local whl in repo"
+          WHL="rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl"
+          if [ -f "$WHL" ]; then
+            echo "Found local whl"
           else
-            echo "⬇️ Downloading patched whl from cncot/rkllm-convert..."
-
-            # Strategy 2: Download using GITHUB_TOKEN for authenticated access
-            pip install requests 2>/dev/null
-            python3 -c "
-import requests, os, sys, time
-
-# Multiple sources to ensure download success
-sources = [
-    # Source 1: GitHub raw content (public, may be rate-limited)
-    {
-        'url': 'https://raw.githubusercontent.com/cncot/rkllm-convert/main/rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl',
-        'headers': {},
-    },
-    # Source 2: GitHub API (authenticated via GITHUB_TOKEN)
-    {
-        'url': 'https://api.github.com/repos/cncot/rkllm-convert/contents/rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl',
-        'headers': {
-            'Authorization': f'Bearer {os.environ.get(\"GH_TOKEN\", \"\")}',
-            'Accept': 'application/vnd.github.v3.raw',
-        },
-    },
-    # Source 3: jsDelivr CDN (GitHub mirror, no auth needed)
-    {
-        'url': 'https://cdn.jsdelivr.net/gh/cncot/rkllm-convert@main/rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl',
-        'headers': {},
-    },
-]
-
-for src in sources:
-    url = src['url']
-    headers = {k: v for k, v in src['headers'].items() if v}  # remove empty headers
-    try:
-        print(f'Trying: {url[:60]}...')
-        r = requests.get(url, headers=headers, timeout=120, allow_redirects=True)
-        size = len(r.content)
-        if r.status_code == 200 and size > 100000:
-            with open('rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl', 'wb') as f:
-                f.write(r.content)
-            print(f'✅ Downloaded ({size} bytes)')
-            break
-        else:
-            print(f'  status={r.status_code}, size={size}')
-    except Exception as e:
-        print(f'  error: {e}')
-    time.sleep(1)
-else:
-    print()
-    print('⚠️  Could not download patched whl automatically.')
-    print('   Please manually get it from:')
-    print('   https://github.com/cncot/rkllm-convert/blob/main/rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl')
-    print('   Download the file and commit it to the repo root, then re-run this workflow.')
-    sys.exit(1)
+            echo "Downloading whl..."
+            pip install requests
+            python3 download_whl.py
           fi
-
-          # Install the whl
-          mv rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64.whl
-          pip install rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64.whl
-          echo "✅ RKLLM-Toolkit v1.2.2 installed successfully"
+          pip install "$WHL"
+          echo "RKLLM-Toolkit installed"
 
       - name: Install dependencies
         run: pip install huggingface_hub accelerate
