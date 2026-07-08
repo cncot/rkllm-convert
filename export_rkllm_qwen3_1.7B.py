@@ -62,16 +62,12 @@ sys.stdout.flush()
 # ── Step 2: Load model with RKLLM Toolkit ──
 llm = RKLLM()
 
-custom_config = {
-    "enable_thinking": enable_thinking,
-}
-
 ret = llm.load_huggingface(
     model=modelpath,
     model_lora=None,
     device="cpu",
     dtype="float16",
-    custom_config=custom_config,
+    custom_config=None,
     load_weight=True,
 )
 if ret != 0:
