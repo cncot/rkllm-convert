@@ -1,0 +1,133 @@
+name: Convert Qwen3-1.7B-thinking (v1.2.2, W8A8, 16K, enable_thinking=True)
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_context:
+        description: 'Max context limit'
+        required: true
+        default: '16384'
+        type: choice
+        options:
+          - '4096'
+          - '8192'
+          - '16384'
+
+env:
+  REPO_ID: "Qwen/Qwen3-1.7B-Instruct-2507"
+  DEFAULT_CONTEXT: "16384"
+  ENABLE_THINKING: "true"
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install patched RKLLM-Toolkit v1.2.2 (16K)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Strategy 1: whl already committed in repo
+          if [ -f rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl ]; then
+            echo "✅ Found local whl in repo"
+          else
+            echo "⬇️ Downloading patched whl from cncot/rkllm-convert..."
+
+            # Strategy 2: Download using GITHUB_TOKEN for authenticated access
+            pip install requests 2>/dev/null
+            python3 -c "
+import requests, os, sys, time
+
+# Multiple sources to ensure download success
+sources = [
+    # Source 1: GitHub raw content (public, may be rate-limited)
+    {
+        'url': 'https://raw.githubusercontent.com/cncot/rkllm-convert/main/rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl',
+        'headers': {},
+    },
+    # Source 2: GitHub API (authenticated via GITHUB_TOKEN)
+    {
+        'url': 'https://api.github.com/repos/cncot/rkllm-convert/contents/rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl',
+        'headers': {
+            'Authorization': f'Bearer {os.environ.get(\"GH_TOKEN\", \"\")}',
+            'Accept': 'application/vnd.github.v3.raw',
+        },
+    },
+    # Source 3: jsDelivr CDN (GitHub mirror, no auth needed)
+    {
+        'url': 'https://cdn.jsdelivr.net/gh/cncot/rkllm-convert@main/rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl',
+        'headers': {},
+    },
+]
+
+for src in sources:
+    url = src['url']
+    headers = {k: v for k, v in src['headers'].items() if v}  # remove empty headers
+    try:
+        print(f'Trying: {url[:60]}...')
+        r = requests.get(url, headers=headers, timeout=120, allow_redirects=True)
+        size = len(r.content)
+        if r.status_code == 200 and size > 100000:
+            with open('rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl', 'wb') as f:
+                f.write(r.content)
+            print(f'✅ Downloaded ({size} bytes)')
+            break
+        else:
+            print(f'  status={r.status_code}, size={size}')
+    except Exception as e:
+        print(f'  error: {e}')
+    time.sleep(1)
+else:
+    print()
+    print('⚠️  Could not download patched whl automatically.')
+    print('   Please manually get it from:')
+    print('   https://github.com/cncot/rkllm-convert/blob/main/rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl')
+    print('   Download the file and commit it to the repo root, then re-run this workflow.')
+    sys.exit(1)
+          fi
+
+          # Install the whl
+          mv rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64.whl
+          pip install rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64.whl
+          echo "✅ RKLLM-Toolkit v1.2.2 installed successfully"
+
+      - name: Install dependencies
+        run: pip install huggingface_hub accelerate
+
+      - name: Add swap (24GB)
+        run: |
+          sudo swapoff /swapfile 2>/dev/null || true
+          sudo rm -f /swapfile
+          sudo fallocate -l 24G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=24576 status=none
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
+      - name: Download model from HuggingFace
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: python3 download_model_qwen3_1.7B.py
+
+      - name: Convert to RKLLM (W8A8, 16K, enable_thinking=True)
+        env:
+          MAX_CONTEXT: ${{ github.event.inputs.max_context || env.DEFAULT_CONTEXT }}
+        run: |
+          python3 export_rkllm_qwen3_1.7B.py
+          ls -lh *.rkllm
+          cat export_summary.json
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Qwen3-1.7B-thinking-w8a8_g128-16k
+          path: |
+            *.rkllm
+            export_summary.json
+          compression-level: 0
+          retention-days: 30
