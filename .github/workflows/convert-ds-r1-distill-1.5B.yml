@@ -57,6 +57,7 @@ jobs:
 
       - name: Install patched RKLLM-Toolkit v1.2.2 (16K support)
         run: |
+          pip install requests -q
           python3 download_toolkit.py
           pip install rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl
           python3 -c "from rkllm.api import RKLLM; print('RKLLM-Toolkit OK')"
