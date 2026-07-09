@@ -1,0 +1,134 @@
+name: Convert DeepSeek-R1-Distill-Qwen-1.5B (v1.2.2, W8A8_G128, 16K)
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_context:
+        description: 'Max context limit'
+        required: true
+        default: '16384'
+        type: choice
+        options:
+          - '4096'
+          - '8192'
+          - '16384'
+          - '32768'
+      quant_algorithm:
+        description: 'Quantization algorithm (normal=fast, default=兼容)'
+        required: true
+        default: 'normal'
+        type: choice
+        options:
+          - 'normal'
+          - 'default'
+      optimization_level:
+        description: 'Optimization level (0=无优化, 1=标准)'
+        required: true
+        default: '1'
+        type: choice
+        options:
+          - '0'
+          - '1'
+      num_npu_core:
+        description: 'NPU core count for RK3588'
+        required: true
+        default: '3'
+        type: choice
+        options:
+          - '2'
+          - '3'
+
+env:
+  REPO_ID: "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
+  MAX_CONTEXT: ${{ inputs.max_context || '16384' }}
+  QUANT_ALGORITHM: ${{ inputs.quant_algorithm || 'normal' }}
+  OPTIMIZATION_LEVEL: ${{ inputs.optimization_level || '1' }}
+  NUM_NPU_CORE: ${{ inputs.num_npu_core || '3' }}
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install patched RKLLM-Toolkit v1.2.2 (16K support)
+        run: |
+          if [ -f rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl ]; then
+            echo "Found local whl file"
+          else
+            echo "Downloading patched whl..."
+            pip install requests -q
+            python3 -c "
+import requests, sys
+urls = [
+    'https://github.com/cncot/rkllm-convert/releases/download/toolkit-v1.2.2/rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl',
+    'https://raw.githubusercontent.com/cncot/rkllm-convert/main/rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl',
+    'https://github.com/cncot/rkllm-convert/raw/main/rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl',
+]
+for url in urls:
+    try:
+        r = requests.get(url, timeout=120, allow_redirects=True)
+        if r.status_code == 200 and len(r.content) > 100000:
+            with open('rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl', 'wb') as f:
+                f.write(r.content)
+            print(f'Downloaded from: {url}')
+            break
+    except Exception as e:
+        print(f'Failed from {url}: {e}')
+else:
+    sys.exit(1)
+"
+          fi
+          pip install rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl
+          python3 -c "from rkllm.api import RKLLM; print('✅ RKLLM-Toolkit OK')"
+
+      - name: Install dependencies
+        run: pip install huggingface_hub accelerate -q
+
+      - name: Create swap space (24GB)
+        run: |
+          sudo fallocate -l 24G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=24576 status=none
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
+      - name: Download model from HuggingFace
+        run: python3 download_model_ds_1.5B.py
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+
+      - name: List model files
+        run: ls -lh ./deepseek-ai-DeepSeek-R1-Distill-Qwen-1.5B/
+
+      - name: Convert to RKLLM format
+        run: |
+          echo "Starting conversion with parameters:"
+          echo "  max_context=${MAX_CONTEXT}"
+          echo "  quant_algorithm=${QUANT_ALGORITHM}"
+          echo "  optimization_level=${OPTIMIZATION_LEVEL}"
+          echo "  num_npu_core=${NUM_NPU_CORE}"
+          echo "This will take 2-4 hours..."
+          python3 export_rkllm_ds_1.5B.py
+        env:
+          MAX_CONTEXT: ${{ env.MAX_CONTEXT }}
+          QUANT_ALGORITHM: ${{ env.QUANT_ALGORITHM }}
+          OPTIMIZATION_LEVEL: ${{ env.OPTIMIZATION_LEVEL }}
+          NUM_NPU_CORE: ${{ env.NUM_NPU_CORE }}
+
+      - name: Upload RKLLM model as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DeepSeek-R1-Distill-Qwen-1.5B-rk3588-w8a8_g128-${{ env.MAX_CONTEXT }}ctx-opt${{ env.OPTIMIZATION_LEVEL }}-${{ env.QUANT_ALGORITHM }}
+          path: ./DeepSeek-R1-Distill-Qwen-1.5B-rk3588-w8a8_g128-*.rkllm
+          retention-days: 30
+
+      - name: Show model info
+        run: |
+          ls -lh ./DeepSeek-R1-Distill-Qwen-1.5B-rk3588-w8a8_g128-*.rkllm
+          md5sum ./DeepSeek-R1-Distill-Qwen-1.5B-rk3588-w8a8_g128-*.rkllm
+          echo "✅ Conversion complete!"
