@@ -57,34 +57,9 @@ jobs:
 
       - name: Install patched RKLLM-Toolkit v1.2.2 (16K support)
         run: |
-          if [ -f rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl ]; then
-            echo "Found local whl file"
-          else
-            echo "Downloading patched whl..."
-            pip install requests -q
-            python3 -c "
-import requests, sys
-urls = [
-    'https://github.com/cncot/rkllm-convert/releases/download/toolkit-v1.2.2/rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl',
-    'https://raw.githubusercontent.com/cncot/rkllm-convert/main/rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl',
-    'https://github.com/cncot/rkllm-convert/raw/main/rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl',
-]
-for url in urls:
-    try:
-        r = requests.get(url, timeout=120, allow_redirects=True)
-        if r.status_code == 200 and len(r.content) > 100000:
-            with open('rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl', 'wb') as f:
-                f.write(r.content)
-            print(f'Downloaded from: {url}')
-            break
-    except Exception as e:
-        print(f'Failed from {url}: {e}')
-else:
-    sys.exit(1)
-"
-          fi
+          python3 download_toolkit.py
           pip install rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl
-          python3 -c "from rkllm.api import RKLLM; print('✅ RKLLM-Toolkit OK')"
+          python3 -c "from rkllm.api import RKLLM; print('RKLLM-Toolkit OK')"
 
       - name: Install dependencies
         run: pip install huggingface_hub accelerate -q
@@ -131,4 +106,4 @@ else:
         run: |
           ls -lh ./DeepSeek-R1-Distill-Qwen-1.5B-rk3588-w8a8_g128-*.rkllm
           md5sum ./DeepSeek-R1-Distill-Qwen-1.5B-rk3588-w8a8_g128-*.rkllm
-          echo "✅ Conversion complete!"
+          echo "Conversion complete!"
