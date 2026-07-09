@@ -14,7 +14,7 @@ on:
           - '16384'
           - '32768'
       quant_algorithm:
-        description: 'Quantization algorithm (normal=fast, default=兼容)'
+        description: 'Quantization algorithm (normal=fast, default=compat)'
         required: true
         default: 'normal'
         type: choice
@@ -22,7 +22,7 @@ on:
           - 'normal'
           - 'default'
       optimization_level:
-        description: 'Optimization level (0=无优化, 1=标准)'
+        description: 'Optimization level (0=none, 1=standard)'
         required: true
         default: '1'
         type: choice
@@ -59,45 +59,7 @@ jobs:
         run: |
           pip install requests -q
           python3 download_toolkit.py
-          python3 -c "
-import zipfile, os, shutil
-
-src = 'rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl'
-if not os.path.exists(src):
-    print('ERROR: wheel not found')
-    exit(1)
-
-# Fix the platform tag inside WHEEL metadata
-tmpdir = '/tmp/wheel_fix'
-if os.path.exists(tmpdir):
-    shutil.rmtree(tmpdir)
-os.makedirs(tmpdir)
-
-with zipfile.ZipFile(src, 'r') as zin:
-    for item in zin.namelist():
-        content = zin.read(item)
-        if item.endswith('WHEEL') or item.endswith('METADATA'):
-            text = content.decode('utf-8')
-            if 'linux_x86_64_patched' in text:
-                text = text.replace('linux_x86_64_patched', 'manylinux2014_x86_64')
-                print(f'Patched {item}: linux_x86_64_patched -> manylinux2014_x86_64')
-                content = text.encode('utf-8')
-        with open(os.path.join(tmpdir, item), 'wb') as f:
-            f.write(content)
-
-# Repack with correct filename
-dst = 'rkllm_toolkit-1.2.2-cp311-cp311-manylinux2014_x86_64.whl'
-with zipfile.ZipFile(dst, 'w', zipfile.ZIP_DEFLATED) as zout:
-    for root, dirs, files in os.walk(tmpdir):
-        for file in files:
-            filepath = os.path.join(root, file)
-            arcname = os.path.relpath(filepath, tmpdir)
-            zout.write(filepath, arcname)
-
-shutil.rmtree(tmpdir)
-os.remove(src)
-print(f'Created {dst}')
-"
+          python3 fix_wheel.py
           pip install rkllm_toolkit-1.2.2-cp311-cp311-manylinux2014_x86_64.whl
           python3 -c "from rkllm.api import RKLLM; print('RKLLM-Toolkit OK')"
 
