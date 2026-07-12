@@ -1,6 +1,7 @@
 """
 Convert Qwen3-4B-Instruct-2507 to RKLLM format for RK3588 NPU.
-32K context using patched RKLLM toolkit v1.2.2.
+16K context using patched RKLLM toolkit v1.2.2.
+opt-level controlled by OPTIMIZATION_LEVEL env var (default 1).
 """
 from rkllm.api import RKLLM
 import os, sys
@@ -10,12 +11,15 @@ if not modelpath:
     print('MODEL_PATH environment variable is required')
     sys.exit(1)
 
-max_context = int(os.environ.get('MAX_CONTEXT', '32768'))
+max_context = int(os.environ.get('MAX_CONTEXT', '16384'))
 if max_context < 32:
     max_context = 32
 
+optimization_level = int(os.environ.get('OPTIMIZATION_LEVEL', '1'))
+
 print(f'Loading model from: {modelpath}')
 print(f'Max context: {max_context}')
+print(f'Optimization level: {optimization_level}')
 sys.stdout.flush()
 
 llm = RKLLM()
@@ -40,9 +44,8 @@ target_platform = "RK3588"
 quantized_dtype = "W8A8"
 quantized_algorithm = "normal"
 num_npu_core = 3
-optimization_level = 1
 
-print(f'Starting quantization: max_context={max_context}, dtype={quantized_dtype}...')
+print(f'Starting quantization: max_context={max_context}, dtype={quantized_dtype}, opt={optimization_level}...')
 sys.stdout.flush()
 
 try:
