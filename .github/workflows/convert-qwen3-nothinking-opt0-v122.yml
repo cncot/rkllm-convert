@@ -1,0 +1,153 @@
+# ====================================================================
+# Qwen3-4B non-thinking RKLLM conversion — v1.2.2, W8A8_G128, 16K
+# opt=0 (no optimization, faster build) — timeout 360min for 4B model
+# ====================================================================
+name: Convert Qwen3-4B (opt=0) v1.2.2 W8A8 16K
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_context:
+        description: 'Max context limit in tokens'
+        required: true
+        default: '16384'
+        type: choice
+        options:
+          - '4096'
+          - '8192'
+          - '16384'
+
+env:
+  REPO_ID: "Qwen/Qwen3-4B-Instruct-2507"
+  DEFAULT_CONTEXT: "16384"
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Parameter summary
+        run: |
+          echo "Model: ${{ env.REPO_ID }}"
+          echo "Max context: ${{ github.event.inputs.max_context || env.DEFAULT_CONTEXT }}"
+          echo "Toolkit: v1.2.2 patched (16K)"
+          echo "Quant: W8A8_G128, opt=0, hybrid=0.0"
+          echo "Timeout: 360 min"
+          echo "CPU: $(nproc) cores"
+          echo "RAM: $(free -h | awk '/^Mem:/{print $2}')"
+
+      - name: Install patched RKLLM-Toolkit v1.2.2 (16K)
+        run: |
+          mv rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64_patched.whl \
+             rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64.whl
+          pip install rkllm_toolkit-1.2.2-cp311-cp311-linux_x86_64.whl
+          python3 -c "from rkllm.api import RKLLM; print('RKLLM-Toolkit OK')"
+
+      - name: Install dependencies
+        run: pip install huggingface_hub accelerate -q
+
+      - name: Check baseline resources
+        run: |
+          echo "=== Memory ==="
+          free -h
+          echo "=== Disk ==="
+          df -h / /home/runner
+
+      - name: Add swap (24GB)
+        run: |
+          sudo swapoff /swapfile 2>/dev/null || true
+          sudo rm -f /swapfile
+          sudo fallocate -l 24G /swapfile || \
+            sudo dd if=/dev/zero of=/swapfile bs=1M count=24576 status=none
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          echo "=== After swap ==="
+          free -h
+
+      - name: Download model from HuggingFace
+        run: python3 download_model_qwen3.py
+
+      - name: Verify model files
+        run: |
+          echo "=== Model files at MODEL_PATH ==="
+          ls -lh ${MODEL_PATH}/
+          echo "---"
+          du -sh ${MODEL_PATH}/
+          echo "---"
+          count=$(ls ${MODEL_PATH}/*.safetensors 2>/dev/null | wc -l)
+          echo "safetensors files: ${count}"
+
+      - name: Ensure non-thinking (disable enable_thinking)
+        run: |
+          python3 -c "
+          import json, glob
+          configs = glob.glob('**/generation_config.json', recursive=True)
+          if not configs:
+              print('WARNING: No generation_config.json found!')
+          for path in configs:
+              with open(path, 'r') as f:
+                  cfg = json.load(f)
+              old_val = cfg.get('enable_thinking', 'N/A')
+              cfg['enable_thinking'] = False
+              with open(path, 'w') as f:
+                  json.dump(cfg, f, indent=2)
+              print(f'  {path}: enable_thinking {old_val} -> False')
+          "
+
+      - name: Convert to RKLLM (W8A8, 16K, opt=0)
+        id: convert
+        env:
+          MAX_CONTEXT: ${{ github.event.inputs.max_context || env.DEFAULT_CONTEXT }}
+          OPTIMIZATION_LEVEL: 0
+        run: |
+          BUILD_START=$(date +%s)
+          python3 export_rkllm_qwen3.py
+          BUILD_DURATION=$(( $(date +%s) - BUILD_START ))
+          echo "BUILD_DURATION=${BUILD_DURATION}" >> $GITHUB_ENV
+          echo "duration=${BUILD_DURATION}" >> $GITHUB_OUTPUT
+          ls -lh *.rkllm
+
+      - name: Show model info
+        run: |
+          echo "=== Output file ==="
+          ls -lh *.rkllm
+          echo "=== MD5 ==="
+          md5sum *.rkllm 2>/dev/null || echo "(no rkllm file)"
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Qwen3-4B-opt0-w8a8_g128-16k-v122
+          path: ./*.rkllm
+          compression-level: 0
+          retention-days: 30
+
+      - name: Build summary
+        if: always()
+        run: |
+          OUTFILE=$(ls *.rkllm 2>/dev/null | head -1)
+          echo "## Build Result: Qwen3-4B (opt=0)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Model | Qwen3-4B-Instruct-2507 |" >> $GITHUB_STEP_SUMMARY
+          echo "| Context | ${{ env.MAX_CONTEXT }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Quant | W8A8_G128, opt=0 |" >> $GITHUB_STEP_SUMMARY
+          echo "| Toolkit | v1.2.2 patched |" >> $GITHUB_STEP_SUMMARY
+          echo "| Thinking | disabled |" >> $GITHUB_STEP_SUMMARY
+          echo "| Duration | ${BUILD_DURATION:-N/A} sec |" >> $GITHUB_STEP_SUMMARY
+          echo "| File | ${OUTFILE:-N/A} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### MD5" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          md5sum *.rkllm 2>/dev/null >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
